@@ -61,6 +61,23 @@ ficar abaixo de 24 por 3 segundos seguidos.
 | medium | ≤1.5 | 512 | opaco/alpha | material simples | grade |
 | low | 1 | off | opaco/alpha | material simples | nenhum |
 
+Medido nos quatro tiers, com `probe.mjs` (autoteste estrutural sem falhas
+em todos, nenhuma etapa de build quebrada, composer ativo onde existe):
+
+| Tier | draw calls | triângulos | programas |
+|---|---|---|---|
+| ultra | 477 | 247 462 | 92 |
+| high | 481 | 249 066 | 85 |
+| medium | 515 | 249 098 | 80 |
+| low | 511 | 244 686 | 58 |
+
+**medium e low têm MAIS draw calls que high, de propósito.** O vidro deles
+deixa de usar `transmission` e vira transparente, e material transparente é
+excluído da fusão para a ordenação continuar correta. A economia dos tiers
+baixos vem de outro lugar — sombras desligadas, sem GTAO, sem bloom, DPR 1,
+e 58 programas contra 92 — que pesa muito mais numa GPU fraca do que 34
+draw calls a mais.
+
 ---
 
 ## 4. Arquitetura do código
@@ -265,6 +282,13 @@ o código não substitui olhar a imagem.
 | **98 materiais fora do agendamento de ambiente** | `Object.keys(M).length` = 36 contra 134 materiais na cena | `applyEnvIntensity` iterava o registro `M`; os materiais anônimos criados dentro dos builders atravessavam o dia com o `envMapIntensity` do instante da construção |
 | **Cove como risca branca dura** | render de dia dos capítulos 4 e 6 | não era brilho — de dia `emissiveIntensity` é 0. Era uma **barra branca de 3 cm exposta** na parede, iluminada como qualquer objeto. Cove real fica dentro de um rasgo, atrás de testeira |
 | Sol não entra no interior ao meio-dia | medição do piso com/sem sol ao longo do dia | **não é defeito**: o beiral de 3,53 m avança 0,5 m além do vidro e a 56° de elevação a penetração é de ~1,4 m. Em t=0,30 (≈28°) o sol contribui +18,0 no piso |
+| **Exterior lendo como dia encoberto** | desligando fonte por fonte no enquadramento geral: env −61 na casa e −28 no terreno, contra sol −11 e −23 | o sol **não era a fonte dominante** ao meio-dia. `envI` em 0,45 era um freio global posto para segurar a parede interna estourada, e o exterior pagava a conta |
+| **Grade regular no gramado** | panorâmica em ângulo rasante | `grassTexture` desenhava 26 manchas e 2600 lâminas **uma vez cada**: tudo que cai na borda é cortado ali, e 450 ladrilhos viram uma grade 450×450 de descontinuidades |
+| **Acolchoado de losangos no gramado** | mesma imagem, depois da primeira correção | regressão da correção anterior: a projeção `(x+0,62z, y+0,37z)` consertou a parede e degenerou o chão |
+| **Pano de vidro virando chapa branca** | render da fachada | tentativa minha de pôr as luzes de janela **fora** do vidro: uma luz de área a 15 cm de um plano ilumina esse plano antes de tudo, e o plano era o vidro |
+| **Casa apagada à noite** | contagem: 31 materiais emissivos acesos contra **8** point lights | as luminárias BRILHAM, mas quase nenhuma ILUMINA. Faltava o rebote do cômodo, que sem GI ninguém faz |
+| "Anel laranja no encosto do sofá" | sonda de material | **não era o sofá**: objeto de 20 cm flutuando na frente dele — o marcador de hotspot, que no produto deve mesmo aparecer. Defeito da imagem de avaliação, não da cena |
+| "Véu leitoso no vidro" | desligando o bloom (161,8 → 161,4) e escondendo o vidro (161,8 → 170,8) | **nenhum dos dois**: era área genuinamente estourada, 18,7% do quadro acima de 240 |
 
 ### O padrão que se repete
 
@@ -286,6 +310,32 @@ E duas vezes o que parecia defeito de cena era defeito de arnês:
 Antes de acreditar numa medição que contraria a física, **verifique se o
 botão está ligado**: mude o parâmetro para um extremo absurdo e confirme
 que a imagem muda. Se não muda, o defeito é do instrumento.
+
+E uma terceira vez o arnês mentiu de outro jeito: os marcadores de hotspot
+são **malha 3D**, não DOM. Esconder os overlays não os tirava do quadro, e
+`o.visible = false` também não — o laço de render reescreve `m.visible` em
+todo quadro. Passei um tempo tratando "um anel laranja no meio do encosto
+do sofá" como defeito de material antes de a sonda dizer que era um objeto
+de 20 cm flutuando **na frente** dele. Agora `shoot.mjs` os retira do grafo
+de cena (`AURA_HOTSPOTS=1` mantém, para conferir o desenho deles).
+
+### Isole uma variável por vez
+
+Duas vezes mexi em dois parâmetros de uma tacada e quase creditei a
+correção ao lado errado:
+
+- **Vidro virando chapa branca.** Suspeitos: rugosidade (0,075 → 0,040) e
+  posição das luzes de janela (z 5,6 → 6,15). Testados separadamente:
+  a posição responde por tudo (vidro 245 contra 179) e a rugosidade por
+  nada (245,3 contra 245,2). Se eu tivesse revertido as duas juntas, teria
+  perdido a melhora real de transmissão que a rugosidade trouxe.
+- **"Véu leitoso".** Suspeitos: bloom e vidro. Nenhum dos dois: desligar o
+  bloom não muda nada (161,8 → 161,4) e **esconder o vidro deixa mais
+  claro** (170,8). O véu era área estourada.
+
+O método que funciona é sempre o mesmo: desligar UMA coisa, medir, religar.
+`quem-ilumina.mjs` faz isso com as fontes de luz e foi o que encontrou tanto
+a oclusão de IBL quanto o sol fraco do exterior.
 
 ## 7b. Oclusão de IBL de interior
 
@@ -353,6 +403,50 @@ Medindo por faixa, com a parede sob controle:
 A diferença entre sala e suíte é legítima — vão de 13 m contra 7,4 m — e
 se ataca abrindo a **janela lateral** (oeste e leste, que existiam na
 arquitetura e não tinham luz), não subindo a intensidade.
+
+### O botão global que segurava duas coisas ao mesmo tempo
+
+`LP.day.envI` valia 0,45. Aquilo não era uma escolha sobre o ambiente: era
+um freio posto para segurar a parede interna estourada pelo IBL sem
+oclusão. Como `envI` é global, o exterior pagava a conta — a casa lia 78 de
+luminância e o terreno 45 ao meio-dia, num dia de sol.
+
+Os dois lados brigavam por um botão só:
+
+| `envI` | ext. casa / terreno | sala: recorte |
+|---|---|---|
+| 0,45 | 78 / 45 | 0,24% |
+| 0,85 | 106 / 58 | 10,13% |
+
+A máscara de interior é justamente o instrumento que separa os dois.
+`envI` subiu 1,89× e o piso da máscara desceu 1,89× (0,30 → 0,16): **o
+interior recebe exatamente o mesmo céu absoluto de antes, e o exterior
+recebe quase o dobro.**
+
+Sempre que um parâmetro global estiver segurando um problema local,
+esse é o sintoma de que falta o instrumento local. Enquanto ele não
+existe, toda calibração é um cabo de guerra.
+
+### `indoorFill`: o rebote que à noite é a luz do cômodo
+
+A contagem que explicou a casa apagada à noite: **31** materiais emissivos
+acesos contra **8** point lights. As luminárias brilham; quase nenhuma
+ilumina. O orçamento de luz real é deliberado e não muda — o que faltava
+era o rebote das paredes claras, que sem GI ninguém faz.
+
+O termo de rebote da máscara, que de dia repõe o pouco de céu que ela
+tirou, à noite **é** a luz do ambiente. `indoorFill` entrou nas paradas
+atmosféricas e é interpolado com o resto:
+
+| parada | `indoorFill` |
+|---|---|
+| dia | 0,15 |
+| golden | 0,30 |
+| blue | 1,20 |
+| noite | 2,40 |
+
+Varrido antes de escolher: de 0 a 2,2 o móvel da sala vai de 11,3 a 66,3 e
+o recorte fica entre 0,6% e 1,6%. O limite não é estouro — é gosto.
 
 ## 8. Se for continuar
 
