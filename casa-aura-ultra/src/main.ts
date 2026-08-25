@@ -91,6 +91,12 @@ async function principal(): Promise<void> {
   const { montarComercial } = await import('./ui/Commercial');
   montarComercial(fsm);
 
+  // A apresentação assume o botão herdado e roda o roteiro pelo diretor
+  // de câmera. Ao terminar, cai no painel comercial — que é o ponto do
+  // filme: a última coisa que o cliente vê é o convite.
+  const { apresentacao } = await import('./ui/Presentation');
+  apresentacao.montar(fsm, cena);
+
   // `await` + try/catch, e não `iniciar()` solto, por dois motivos:
   //
   // 1. Disparar uma função async sem await transforma qualquer exceção

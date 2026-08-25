@@ -1,0 +1,90 @@
+{
+  "_leia": "Roteiro do modo APRESENTAÇÃO. Não é a lista de capítulos: capítulo é destino de navegação, plano é movimento com duração e narração. As posições vêm das câmeras de capítulo já validadas renderizando — o que muda aqui é que elas viram origem e destino de um movimento, com foco e campo de visão próprios.",
+  "planos": [
+    {
+      "titulo": "Chegada",
+      "legenda": "Casa Aura. Dois volumes em balanço, unidos por um núcleo de pedra.",
+      "posicao": [18, 7.5, 16],
+      "alvo": [-1, 4.2, 0],
+      "passagem": [[24, 9.5, 6]],
+      "duracao": 7,
+      "pausa": 1.2,
+      "foco": 24,
+      "luz": "day"
+    },
+    {
+      "titulo": "A fachada",
+      "legenda": "Vidro do piso ao teto. A casa não tem fundos — todas as faces são fachada.",
+      "posicao": [1, 3.0, 13.5],
+      "alvo": [-4, 2.6, 6.5],
+      "duracao": 6,
+      "pausa": 1,
+      "foco": 8.5,
+      "mirarSempre": true,
+      "luz": "day"
+    },
+    {
+      "titulo": "O estar",
+      "legenda": "O social se abre inteiro para a piscina. Sem corredor, sem transição.",
+      "posicao": [-8.6, 1.6, 3.2],
+      "alvo": [-8.8, 1.15, -2.2],
+      "duracao": 6,
+      "pausa": 1,
+      "foco": 5.5,
+      "fovFinal": 38,
+      "luz": "day"
+    },
+    {
+      "titulo": "Cozinha e jantar",
+      "legenda": "Ilha em pedra, mesa para seis, e a luz da tarde entrando pelo vão.",
+      "posicao": [-2.6, 1.7, 4.2],
+      "alvo": [0.4, 1.1, 0.9],
+      "duracao": 6,
+      "pausa": 1,
+      "foco": 4.4,
+      "luz": "golden"
+    },
+    {
+      "titulo": "O terraço",
+      "legenda": "O pavimento superior avança sobre a área social e cria a sombra do deck.",
+      "posicao": [3.2, 5.4, 6.2],
+      "alvo": [-2.2, 4.1, 0.6],
+      "duracao": 6.5,
+      "pausa": 1,
+      "foco": 7.8,
+      "luz": "golden"
+    },
+    {
+      "titulo": "A piscina",
+      "legenda": "Borda infinita voltada para o jardim, deck em ipê e área gourmet coberta.",
+      "posicao": [-4.2, 3.3, 17.6],
+      "alvo": [-5.2, 0.15, 9.6],
+      "passagem": [[2.5, 4.2, 18.5]],
+      "duracao": 7.5,
+      "pausa": 1.2,
+      "foco": 9,
+      "luz": "golden"
+    },
+    {
+      "titulo": "Entardecer",
+      "legenda": "Exterior frio, interior quente. É o contraste que define a casa ao anoitecer.",
+      "posicao": [14, 6.0, 15],
+      "alvo": [-1, 4.0, 0],
+      "duracao": 7,
+      "pausa": 1.5,
+      "foco": 21,
+      "luz": "blue"
+    },
+    {
+      "titulo": "Casa Aura",
+      "legenda": "Projeto conceitual completo. Vamos conversar sobre o seu.",
+      "posicao": [-19, 9.0, 19],
+      "alvo": [-1, 4.2, 0],
+      "passagem": [[-22, 11, 4]],
+      "duracao": 8,
+      "pausa": 2,
+      "foco": 30,
+      "luz": "night"
+    }
+  ]
+}

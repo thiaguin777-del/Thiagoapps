@@ -32,9 +32,15 @@ type Ouvinte = (para: Estado, de: Estado) => void;
 // voltar para a casa sem recarregar.
 const PERMITIDO: Record<Estado, Estado[]> = {
   LOADING: ['HERO', 'COMMERCIAL'],
-  HERO: ['EXPLORING', 'CINEMATIC', 'COMMERCIAL'],
+  // HERO -> PRESENTATION existe porque o botão "Apresentação" fica na
+  // barra de modos, que está na tela desde o hero. Sem esta entrada o
+  // botão era recusado pela tabela e não fazia absolutamente nada — um
+  // botão morto na primeira tela que o cliente vê.
+  HERO: ['EXPLORING', 'CINEMATIC', 'PRESENTATION', 'COMMERCIAL'],
   EXPLORING: ['CINEMATIC', 'PRESENTATION', 'COMMERCIAL', 'HERO'],
-  CINEMATIC: ['EXPLORING', 'COMMERCIAL'],
+  // Trocar de um modo automático para o outro é legítimo: são duas
+  // formas de assistir, não dois pontos de um caminho.
+  CINEMATIC: ['EXPLORING', 'PRESENTATION', 'COMMERCIAL'],
   PRESENTATION: ['EXPLORING', 'COMMERCIAL'],
   COMMERCIAL: ['EXPLORING', 'HERO'],
 };
