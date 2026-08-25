@@ -165,5 +165,21 @@ window.__AURA = {
 html = html.replace(/\ninit\(\)\.catch\(/, `\n${hook}\ninit().then(()=>{window.__AURA.ready=true;}).catch(`);
 html = html.replace('</body>', `<script>window.__TEST__=true;</script></body>`);
 
+// VERIFICAÇÃO DE SINTAXE DA PÁGINA GERADA
+// Um erro de escape no gancho injetado aqui torna a página inteira JS
+// inválido, e o sintoma que aparece lá na frente é "módulo não expôs
+// __AURA" — que parece defeito da cena. Checar o arquivo de produção não
+// pega isso: quem precisa ser válido é o que o navegador carrega.
+const corpo = html.slice(
+  html.indexOf('<script type="module">') + '<script type="module">'.length,
+  html.indexOf('</script>', html.indexOf('<script type="module">')));
+try {
+  new Function(corpo.replace(/^\s*import .*$/gm, ''));
+} catch (e) {
+  console.error('\nPÁGINA GERADA COM SINTAXE INVÁLIDA — provável erro de escape no gancho.');
+  console.error(e.message);
+  process.exit(1);
+}
+
 writeFileSync(new URL(out, import.meta.url), html);
 console.log('página de teste gerada:', out, (html.length / 1024 / 1024).toFixed(2) + ' MB');
