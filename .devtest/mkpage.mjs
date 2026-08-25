@@ -130,9 +130,17 @@ window.__AURA = {
     for (let i = 0; i < 200; i++) updateReveal(0.05);
     r.revealVolta = upperMass ? +upperMass.position.y.toFixed(2) : null;
 
-    // Água: o Water.js não pode ter sido fundido
-    r.agua = waterObj ? { existe: true, temUniforms: !!(waterObj.material && waterObj.material.uniforms) } : { existe: false };
-    if (waterObj && !waterObj.material.uniforms) r.falhas.push('Water.js perdeu uniforms');
+    // Água: existe e não foi engolida pela fusão. A asserção anterior
+    // exigia uniforms de ShaderMaterial — escrita quando a água era
+    // Water.js. Depois da troca para MeshPhysicalMaterial ela virava
+    // falso positivo em toda execução; o que importa agora é a lâmina
+    // estar na cena, com material próprio e transparente.
+    r.agua = waterObj
+      ? { existe: true, transparente: !!waterObj.material.transparent,
+          opacidade: waterObj.material.opacity }
+      : { existe: false };
+    if (!waterObj) r.falhas.push('lâmina d\'água ausente');
+    else if (!waterObj.material.transparent) r.falhas.push('água deixou de ser transparente');
 
     r.luzesReais = lampLights.length;
     r.emissivas = emissiveFixtures.length;
