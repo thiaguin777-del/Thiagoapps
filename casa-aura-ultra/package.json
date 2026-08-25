@@ -1,0 +1,24 @@
+{
+  "name": "casa-aura-ultra",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Casa Aura Ultra — experiência imobiliária 3D web",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "gsap": "^3.12.5",
+    "howler": "^2.2.4",
+    "three": "^0.160.1"
+  },
+  "devDependencies": {
+    "@types/howler": "^2.2.11",
+    "@types/three": "^0.160.0",
+    "typescript": "^5.4.5",
+    "vite": "^5.2.11"
+  }
+}

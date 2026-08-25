@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, viewport-fit=cover">
+<meta name="theme-color" content="#0d0f12">
+<meta name="description" content="Casa Aura — experiência imobiliária 3D. Navegue pela residência, explore cada ambiente e sinta a arquitetura em primeira pessoa.">
+<meta name="color-scheme" content="dark">
+
+<!-- Open Graph: o link circula por WhatsApp entre corretor e cliente, e
+     um link sem cartão perde metade dos cliques. -->
+<meta property="og:type" content="website">
+<meta property="og:title" content="Casa Aura — experiência 3D">
+<meta property="og:description" content="Uma nova forma de apresentar imóveis de alto padrão.">
+<meta property="og:image" content="/assets/fallback/og.jpg">
+
+<!-- preconnect só para o que realmente é buscado de fora. O motor 3D e as
+     texturas vêm do mesmo domínio; sobra a fonte, que degrada sozinha. -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,400;9..144,500&family=Inter:wght@300;400;500;600&display=swap">
+
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/favicon.ico">
+<title>Casa Aura — experiência imobiliária 3D</title>
+</head>
+<body data-mode="explore">
+
+<div id="loader">
+  <div class="load-mark">Casa Aura</div>
+  <div class="load-bar"></div>
+  <div id="load-pct">0%</div>
+</div>
+
+<div id="canvas-wrap"></div>
+
+<div id="hero">
+  <div class="hero-eyebrow">Projeto Conceitual</div>
+  <h1 class="hero-title">Casa Aura</h1>
+  <p class="hero-lede">Uma nova forma de apresentar imóveis. Navegue pela residência, explore cada ambiente e sinta a arquitetura em primeira pessoa.</p>
+  <div class="hero-actions">
+    <button class="hero-btn primary" id="btn-explore">Explorar</button>
+    <button class="hero-btn secondary" id="btn-cinematic">Modo Cinemático</button>
+  </div>
+</div>
+
+<div class="ui">
+  <div class="top-bar" id="top-bar">
+    <div>
+      <div class="brand-mark">Casa Aura</div>
+      <div class="concept-tag">Projeto Conceitual</div>
+    </div>
+    <div class="chapter-tag" id="ch-tag"></div>
+  </div>
+
+  <div class="chapter-overlay" id="ch-overlay">
+    <div class="ch-eyebrow" id="ch-eyebrow"></div>
+    <div class="ch-title" id="ch-title"></div>
+    <div class="ch-desc" id="ch-desc"></div>
+  </div>
+
+  <div class="bottom-bar" id="bottom-bar">
+    <div class="solar-wrap">
+      <div class="solar-head">
+        <span class="solar-title">Percurso Solar</span>
+        <span class="solar-time" id="solar-label">12:00</span>
+      </div>
+      <div class="solar-track" id="solar-track" role="slider" aria-label="Percurso solar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" tabindex="0">
+        <div class="solar-fill" id="solar-fill"></div>
+        <div class="solar-thumb" id="solar-thumb"></div>
+      </div>
+      <div class="light-group">
+        <button class="light-btn active" data-light="day">Dia</button>
+        <button class="light-btn" data-light="golden">Golden</button>
+        <button class="light-btn" data-light="blue">Blue Hour</button>
+        <button class="light-btn" data-light="night">Noite</button>
+      </div>
+    </div>
+    <div class="nav-dots" id="nav-dots"></div>
+    <div class="mode-controls">
+      <button class="mode-btn" id="btn-audio" style="display:none">Som</button>
+      <button class="mode-btn" id="btn-reveal">Modo Corte</button>
+      <button class="mode-btn" id="btn-present">Apresentação</button>
+    </div>
+  </div>
+
+  <div class="present-controls" id="present-controls">
+    <button class="pc-btn" id="btn-prev">‹</button>
+    <button class="pc-btn" id="btn-exit-present">✕</button>
+    <button class="pc-btn" id="btn-next">›</button>
+  </div>
+</div>
+
+<div id="fade-cut"></div>
+
+<div id="hs-label"><div class="hst"></div><div class="hsd"></div></div>
+
+<div class="commercial" id="commercial">
+  <button class="comm-close" id="comm-close">✕</button>
+  <div class="comm-scroll">
+  <div class="comm-panel">
+    <div class="comm-eyebrow">Agora imagine isso</div>
+    <h2 class="comm-title">Aplicado ao seu portfólio.</h2>
+    <p class="comm-lede">O que você acabou de explorar — construído a partir do modelo real de um imóvel — pode ser criado para qualquer propriedade do seu portfólio.</p>
+
+    <div class="chips">
+      <div class="chip">Reels</div><div class="chip">Stories</div><div class="chip">Anúncios</div>
+      <div class="chip">Apresentações</div><div class="chip">Campanhas</div><div class="chip">Lançamentos</div>
+      <div class="chip">Materiais para corretores</div><div class="chip">WhatsApp</div>
+    </div>
+
+    <div style="margin-top:32px;">
+      <div class="comm-eyebrow">Do imóvel à distribuição</div>
+      <h2 class="comm-title" style="font-size:22px;margin-top:6px;">Como funciona.</h2>
+      <div class="process">
+        <div class="process-step"><div class="idx">01</div><div class="txt">Imóvel</div></div>
+        <div class="process-step"><div class="idx">02</div><div class="txt">Modelo 3D real</div></div>
+        <div class="process-step"><div class="idx">03</div><div class="txt">Visualização Web</div></div>
+        <div class="process-step"><div class="idx">04</div><div class="txt">Câmeras &amp; luz</div></div>
+        <div class="process-step"><div class="idx">05</div><div class="txt">Conteúdo</div></div>
+        <div class="process-step"><div class="idx">06</div><div class="txt">Distribuição</div></div>
+      </div>
+    </div>
+
+    <div style="margin-top:32px;">
+      <div class="comm-eyebrow">De um imóvel a uma operação</div>
+      <h2 class="comm-title" style="font-size:22px;margin-top:6px;">Recorrência.</h2>
+      <div class="ladder">
+        <div class="ladder-row"><div class="n">1</div><div class="t">imóvel — a experiência que você acabou de ver</div></div>
+        <div class="ladder-row"><div class="n">4</div><div class="t">imóveis por mês — ritmo de operação contínua</div></div>
+        <div class="ladder-row"><div class="n">10+</div><div class="t">imóveis — cobertura de campanha e lançamento</div></div>
+        <div class="ladder-row"><div class="n">∞</div><div class="t">conteúdo recorrente para o portfólio inteiro</div></div>
+      </div>
+    </div>
+
+    <div style="margin-top:32px;">
+      <div class="comm-eyebrow">Planos</div>
+      <h2 class="comm-title" style="font-size:22px;margin-top:6px;">Comece com um imóvel.</h2>
+      <div class="plans">
+        <div class="plan">
+          <div class="plan-name">Avulso</div>
+          <div class="plan-price">R$ 800–1.500</div>
+          <div class="plan-desc">1 experiência 3D a partir do modelo real · 1 revisão · entrega em 24–72h</div>
+        </div>
+        <div class="plan featured">
+          <div class="plan-name">Mensal</div>
+          <div class="plan-price">R$ 1.800–3.000/mês</div>
+          <div class="plan-desc">Experiências recorrentes para imóveis variados do portfólio</div>
+        </div>
+        <div class="plan">
+          <div class="plan-name">Premium</div>
+          <div class="plan-price">R$ 4.000–8.000</div>
+          <div class="plan-desc">Experiência completa + cortes para campanhas pagas · 5–7 dias</div>
+        </div>
+      </div>
+    </div>
+
+    <div style="margin-top:36px;">
+      <h2 class="comm-title" style="font-size:22px;">Quer ver isso aplicado a<br>um imóvel real do seu portfólio?</h2>
+      <div class="comm-actions" style="margin-top:16px;">
+        <a class="hero-btn primary" id="cta-whatsapp" href="#" target="_blank" rel="noopener">Falar no WhatsApp</a>
+      </div>
+      <p class="disclaimer">Casa Aura é um projeto conceitual, criado para demonstração — uma base visual para apresentações comerciais. Nenhum endereço ou imóvel específico é representado.</p>
+    </div>
+  </div>
+  </div>
+</div>
+
+<div id="fallback">
+  <div class="fb-title">Casa Aura</div>
+  <p class="fb-text">Seu navegador não conseguiu iniciar a visualização 3D. Isso costuma acontecer em modo de economia de energia ou navegadores muito antigos — tente atualizar a página ou usar outro navegador.</p>
+  <div class="fb-cards">
+    <div class="fb-card">Exterior</div>
+    <div class="fb-card">Sala de Estar</div>
+    <div class="fb-card">Cozinha</div>
+    <div class="fb-card">Suíte Master</div>
+    <div class="fb-card">Piscina</div>
+    <div class="fb-card">Anoitecer</div>
+  </div>
+  <button class="hero-btn primary" id="fb-cta" onclick="location.reload()">Tentar novamente</button>
+</div>
+
+<div id="debug-panel"></div>
+
+<script type="module" src="/src/main.ts"></script>
+</body>
+</html>
