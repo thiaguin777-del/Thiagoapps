@@ -980,14 +980,18 @@ function setupLighting() {
   sunLight.castShadow = q.shadows;
   if (q.shadows) {
     sunLight.shadow.mapSize.set(q.shadowMap, q.shadowMap);
+    // Frustum alargado junto com a correção do arco solar: com o sol em
+    // 11° na golden hour a sombra da casa passa de 20 m, e o volume
+    // anterior (±26 m, far 90) cortava a sombra no meio do gramado.
     sunLight.shadow.camera.near = 1;
-    sunLight.shadow.camera.far = 90;
-    sunLight.shadow.camera.left = -26;
-    sunLight.shadow.camera.right = 26;
-    sunLight.shadow.camera.top = 22;
-    sunLight.shadow.camera.bottom = -22;
-    sunLight.shadow.bias = -0.0008;
-    sunLight.shadow.normalBias = 0.02;
+    sunLight.shadow.camera.far = 130;
+    sunLight.shadow.camera.left = -32;
+    sunLight.shadow.camera.right = 32;
+    sunLight.shadow.camera.top = 28;
+    sunLight.shadow.camera.bottom = -28;
+    sunLight.shadow.bias = -0.0006;
+    sunLight.shadow.normalBias = 0.025;
+    sunLight.shadow.radius = 2.0;   // PCFSoft: borda de sombra menos dura
   }
   scene.add(sunLight);
 
@@ -1041,11 +1045,32 @@ const SOLAR_T = { day: 0.00, golden: 0.52, blue: 0.76, night: 1.00 };
 
 // Ângulos do arco solar. Azimute varre de leste para oeste; elevação
 // desce de alta (meio-dia) até abaixo do horizonte (noite).
-const SUN_ARC = { azStart: 35, azEnd: 205, elStart: 68, elEnd: -12, radius: 62 };
+// CORRIGIDO: a elevação era interpolada LINEARMENTE de 68° a -12°, então
+// a parada "golden" (t=0,52) caía em 26° de altura — que não é golden
+// hour, é meio da tarde. Sol alto não modela volume: achata a fachada e
+// encurta a sombra, e era parte do motivo de a casa parecer maquete.
+//
+// Agora a elevação tem chaves próprias, ancoradas nas mesmas paradas do
+// heliodon: 'day' já entra em 56° (sol de meio-dia com direção legível),
+// 'golden' em 11° (luz rasante, sombra longa, fachada raspada de lado) e
+// 'blue' logo abaixo, com o sol quase no horizonte.
+const SUN_KEYS = [
+  { t: 0.00, az: 44,  el: 56 },
+  { t: 0.52, az: 133, el: 11 },
+  { t: 0.76, az: 174, el: 2.2 },
+  { t: 1.00, az: 205, el: -10 },
+];
+const SUN_ARC = { radius: 62 };
 
 function sunPositionAt(t) {
-  const az = (SUN_ARC.azStart + (SUN_ARC.azEnd - SUN_ARC.azStart) * t) * Math.PI / 180;
-  const el = (SUN_ARC.elStart + (SUN_ARC.elEnd - SUN_ARC.elStart) * t) * Math.PI / 180;
+  t = Math.max(0, Math.min(1, t));
+  let i = 0;
+  while (i < SUN_KEYS.length - 2 && t > SUN_KEYS[i + 1].t) i++;
+  const a = SUN_KEYS[i], b = SUN_KEYS[i + 1];
+  let f = (t - a.t) / ((b.t - a.t) || 1);
+  f = f * f * (3 - 2 * f);
+  const az = (a.az + (b.az - a.az) * f) * Math.PI / 180;
+  const el = (a.el + (b.el - a.el) * f) * Math.PI / 180;
   const R = SUN_ARC.radius;
   return new THREE.Vector3(
     Math.cos(az) * Math.cos(el) * R,
@@ -1500,6 +1525,239 @@ function gravelTexture(baseHex) {
   tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
   return tex;
 }
+
+// ============================================================
+// VEGETAÇÃO — CARTÕES DE FOLHAGEM
+// ------------------------------------------------------------
+// O maior denunciador de CGI da cena era a copa: um cone (ou icosaedro)
+// de cor chapada. Nenhuma árvore real tem silhueta poliédrica fechada —
+// copa de verdade tem borda recortada, furos por onde o céu aparece e
+// luz atravessando a folha.
+//
+// A técnica de archviz em tempo real para isso é o CARTÃO DE FOLHAGEM:
+// um quad com textura recortada em alpha. Vários cartões em orientações
+// aleatórias formam a copa. O custo continua sendo 1 draw call por
+// grupo, porque todos compartilham geometria e material — o que muda é
+// só o número de instâncias.
+// ============================================================
+
+// Desenha uma folha lanceolada apontando para +x, com nervura central.
+function _drawLeaf(ctx, len, wid, fill, vein) {
+  ctx.beginPath();
+  ctx.moveTo(0, 0);
+  ctx.quadraticCurveTo(len * 0.42, -wid, len, 0);
+  ctx.quadraticCurveTo(len * 0.42, wid, 0, 0);
+  ctx.fillStyle = fill;
+  ctx.fill();
+  if (vein) {
+    ctx.beginPath();
+    ctx.moveTo(len * 0.06, 0);
+    ctx.lineTo(len * 0.92, 0);
+    ctx.strokeStyle = vein;
+    ctx.lineWidth = Math.max(0.6, wid * 0.13);
+    ctx.stroke();
+  }
+}
+
+// Um cartão = um tufo de folhas com fundo transparente. A densidade cai
+// para a borda, então a silhueta sai recortada em vez de circular.
+function leafCardTexture(baseHex, opts) {
+  opts = opts || {};
+  const S = opts.size || 256;
+  const count = opts.count || 130;
+  const c = document.createElement('canvas');
+  c.width = S; c.height = S;
+  const ctx = c.getContext('2d');
+  const cx = S / 2, cy = S / 2;
+  const R = S * 0.46;
+
+  for (let i = 0; i < count; i++) {
+    // raiz quadrada da uniforme concentra folhas no miolo e rarefaz a
+    // borda — é isso que dá o recorte irregular contra o céu
+    const rr = Math.sqrt(Math.random()) * R;
+    const a = Math.random() * Math.PI * 2;
+    const x = cx + Math.cos(a) * rr;
+    const y = cy + Math.sin(a) * rr;
+    // folhas do fundo mais escuras: profundidade dentro da própria copa
+    const depth = 0.55 + (1 - rr / R) * 0.15 + Math.random() * 0.45;
+    const len = S * (0.085 + Math.random() * 0.075) * (opts.leafScale || 1);
+    const wid = len * (opts.narrow ? 0.16 : 0.30);
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(Math.random() * Math.PI * 2);
+    _drawLeaf(ctx, len, wid, shadeHex(baseHex, depth), shadeHex(baseHex, depth * 0.72));
+    ctx.restore();
+  }
+
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+// Casca com estrias verticais — o tronco de cor chapada lia como cano.
+function barkTexture(baseHex) {
+  const tex = makeCanvasTexture(128, (ctx, s) => {
+    ctx.fillStyle = baseHex;
+    ctx.fillRect(0, 0, s, s);
+    for (let i = 0; i < 90; i++) {
+      const x = Math.random() * s;
+      const w = 1 + Math.random() * 3;
+      ctx.fillStyle = shadeHex(baseHex, 0.62 + Math.random() * 0.62);
+      ctx.globalAlpha = 0.5 + Math.random() * 0.5;
+      // estria quebrada, não linha contínua: casca não é listrada
+      let y = 0;
+      while (y < s) {
+        const h = 6 + Math.random() * 26;
+        ctx.fillRect(x + (Math.random() - 0.5) * 2, y, w, h);
+        y += h + Math.random() * 5;
+      }
+    }
+    ctx.globalAlpha = 1;
+  });
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  return tex;
+}
+
+// ============================================================
+// GRAMA — a textura anterior era gravelTexture() esticada
+// ------------------------------------------------------------
+// MEDIDO no render: gravelTexture(128px) com repeat 34 sobre um plano de
+// 260 m dá 7,6 m por ladrilho. Perto da câmera não há detalhe nenhum
+// (cada pixel da textura cobre ~6 cm) e longe o padrão se repete visível.
+// Resultado: o "tapete verde" lavado.
+//
+// Aqui a textura é de grama de verdade — lâminas curtas em várias
+// direções, com variação de tom — e a repetição fica pequena o
+// suficiente para ter detalhe perto. O tiling que isso criaria é
+// quebrado depois por applyMacroVariation().
+// ============================================================
+function grassTexture(baseHex) {
+  const tex = makeCanvasTexture(256, (ctx, s) => {
+    ctx.fillStyle = shadeHex(baseHex, 0.82);
+    ctx.fillRect(0, 0, s, s);
+    // manchas largas de tom antes das lâminas: gramado real tem áreas
+    // mais secas e mais verdes, nunca cor única
+    for (let i = 0; i < 26; i++) {
+      const g = ctx.createRadialGradient(
+        Math.random() * s, Math.random() * s, 0,
+        Math.random() * s, Math.random() * s, s * (0.15 + Math.random() * 0.3));
+      const tone = shadeHex(baseHex, 0.78 + Math.random() * 0.5);
+      g.addColorStop(0, tone); g.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = g;
+      ctx.fillRect(0, 0, s, s);
+    }
+    // lâminas
+    ctx.lineCap = 'round';
+    for (let i = 0; i < 2600; i++) {
+      const x = Math.random() * s, y = Math.random() * s;
+      const a = -Math.PI / 2 + (Math.random() - 0.5) * 1.7;
+      const len = 3 + Math.random() * 7;
+      ctx.strokeStyle = shadeHex(baseHex, 0.6 + Math.random() * 0.75);
+      ctx.lineWidth = 0.7 + Math.random() * 1.1;
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      ctx.quadraticCurveTo(
+        x + Math.cos(a) * len * 0.5 + 1.5, y + Math.sin(a) * len * 0.5,
+        x + Math.cos(a) * len, y + Math.sin(a) * len);
+      ctx.stroke();
+    }
+  });
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  return tex;
+}
+
+// Normal map derivado de ruído — dá relevo à grama e ao cascalho, que
+// sem normal recebem luz como um plano liso e por isso "lavam".
+function noiseNormalTexture(scale, strength) {
+  const S = 128;
+  const c = document.createElement('canvas');
+  c.width = S; c.height = S;
+  const ctx = c.getContext('2d');
+  const img = ctx.createImageData(S, S);
+  const h = new Float32Array(S * S);
+  // ruído de valor em 3 oitavas, com wrap para a textura ladrilhar
+  for (let o = 0; o < 3; o++) {
+    const freq = scale * Math.pow(2, o);
+    const amp = 1 / Math.pow(2, o);
+    const grid = [];
+    for (let i = 0; i < freq * freq; i++) grid.push(Math.random());
+    for (let y = 0; y < S; y++) {
+      for (let x = 0; x < S; x++) {
+        const fx = (x / S) * freq, fy = (y / S) * freq;
+        const x0 = Math.floor(fx) % freq, y0 = Math.floor(fy) % freq;
+        const x1 = (x0 + 1) % freq, y1 = (y0 + 1) % freq;
+        const tx = fx - Math.floor(fx), ty = fy - Math.floor(fy);
+        const sx = tx * tx * (3 - 2 * tx), sy = ty * ty * (3 - 2 * ty);
+        const a = grid[y0 * freq + x0], b = grid[y0 * freq + x1];
+        const cc = grid[y1 * freq + x0], d = grid[y1 * freq + x1];
+        h[y * S + x] += amp * ((a + (b - a) * sx) + ((cc + (d - cc) * sx) - (a + (b - a) * sx)) * sy);
+      }
+    }
+  }
+  for (let y = 0; y < S; y++) {
+    for (let x = 0; x < S; x++) {
+      const l = h[y * S + ((x - 1 + S) % S)], r = h[y * S + ((x + 1) % S)];
+      const u = h[((y - 1 + S) % S) * S + x], d = h[((y + 1) % S) * S + x];
+      const nx = (l - r) * strength, ny = (u - d) * strength;
+      const nz = 1;
+      const len = Math.hypot(nx, ny, nz);
+      const i = (y * S + x) * 4;
+      img.data[i] = ((nx / len) * 0.5 + 0.5) * 255;
+      img.data[i + 1] = ((ny / len) * 0.5 + 0.5) * 255;
+      img.data[i + 2] = ((nz / len) * 0.5 + 0.5) * 255;
+      img.data[i + 3] = 255;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  const tex = new THREE.CanvasTexture(c);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  return tex;
+}
+
+// ============================================================
+// QUEBRA DE TILING POR VARIAÇÃO MACRO
+// ------------------------------------------------------------
+// Repetir uma textura o suficiente para ter detalhe perto cria padrão
+// visível longe. A solução padrão de terreno é modular a cor difusa por
+// um ruído de escala grande em espaço de mundo: o olho perde a grade
+// porque a variação macro não coincide com o período do ladrilho.
+// Custo: algumas instruções por fragmento, sem textura extra.
+// ============================================================
+function applyMacroVariation(material, scale, strength, prevHook) {
+  const prev = prevHook || material.onBeforeCompile;
+  material.onBeforeCompile = (shader) => {
+    if (prev) prev(shader);
+    shader.uniforms.uMacroScale = { value: scale };
+    shader.uniforms.uMacroStrength = { value: strength };
+    shader.vertexShader = 'varying vec3 vMacroWPos;\n' + shader.vertexShader.replace(
+      '#include <begin_vertex>',
+      '#include <begin_vertex>\n  vMacroWPos = (modelMatrix * vec4(transformed, 1.0)).xyz;');
+    shader.fragmentShader = [
+      'uniform float uMacroScale;',
+      'uniform float uMacroStrength;',
+      'varying vec3 vMacroWPos;',
+      'float auraHash(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }',
+      'float auraNoise(vec2 p){',
+      '  vec2 i = floor(p), f = fract(p);',
+      '  vec2 u = f * f * (3.0 - 2.0 * f);',
+      '  return mix(mix(auraHash(i), auraHash(i + vec2(1.0, 0.0)), u.x),',
+      '             mix(auraHash(i + vec2(0.0, 1.0)), auraHash(i + vec2(1.0, 1.0)), u.x), u.y);',
+      '}',
+    ].join('\n') + '\n' + shader.fragmentShader.replace(
+      '#include <color_fragment>',
+      [
+        '#include <color_fragment>',
+        '{',
+        '  vec2 mp = vMacroWPos.xz / uMacroScale;',
+        // duas oitavas incomensuráveis com o período do ladrilho
+        '  float n = auraNoise(mp) * 0.62 + auraNoise(mp * 2.73) * 0.38;',
+        '  diffuseColor.rgb *= 1.0 + (n - 0.5) * 2.0 * uMacroStrength;',
+        '}',
+      ].join('\n'));
+  };
+  material.needsUpdate = true;
+}
+
 // Normal map procedural de ondulação da água. Gera altura suave a partir
 // de senóides sobrepostas e converte para normal tangente. Animando o
 // offset dessa textura, a superfície ganha movimento real — sem shader
@@ -1601,10 +1859,35 @@ function buildMaterials() {
     roupaCama:    new THREE.MeshStandardMaterial({ color: 0xf1ece1, roughness: 0.85, metalness: 0 }),
     tapete:       new THREE.MeshStandardMaterial({ map: rugPatternTexture('#d8cdb8', '#a3937a'), roughness: 1.0, metalness: 0 }),
     banheira:     new THREE.MeshStandardMaterial({ color: 0xf4f1ea, roughness: 0.25, metalness: 0 }),
-    gramado:      new THREE.MeshStandardMaterial({ map: gravelTexture('#7d9560'), roughness: 1.0, metalness: 0, envMapIntensity: 0.25 }),
-    troncoArvore: new THREE.MeshStandardMaterial({ color: 0x7a6349, roughness: 0.95, metalness: 0 }),
-    copaArvore:   new THREE.MeshStandardMaterial({ color: 0x4f6b42, roughness: 0.98, metalness: 0, envMapIntensity: 0.3 }),
-    copaArvore2:  new THREE.MeshStandardMaterial({ color: 0x6b8452, roughness: 0.98, metalness: 0, envMapIntensity: 0.3 }),
+    gramado:      new THREE.MeshStandardMaterial({
+      map: grassTexture('#6f8a4f'),
+      normalMap: noiseNormalTexture(8, 2.6),
+      normalScale: new THREE.Vector2(0.7, 0.7),
+      roughness: 0.96, metalness: 0, envMapIntensity: 0.22,
+    }),
+    troncoArvore: new THREE.MeshStandardMaterial({ map: barkTexture('#6d5945'), roughness: 0.96, metalness: 0 }),
+    // COPAS — cartões recortados em alpha (ver leafCardTexture).
+    // alphaTest em vez de transparent: mantém a escrita no depth buffer,
+    // então a copa se auto-ordena corretamente e ainda projeta sombra
+    // recortada. Transparência ordenada seria mais bonita e muito mais
+    // cara, com artefato de ordenação garantido em copa densa.
+    copaArvore:   new THREE.MeshStandardMaterial({
+      map: leafCardTexture('#4e6b3c'), alphaTest: 0.42, side: THREE.DoubleSide,
+      roughness: 0.95, metalness: 0, envMapIntensity: 0.3,
+    }),
+    copaArvore2:  new THREE.MeshStandardMaterial({
+      map: leafCardTexture('#6d8a4a', { leafScale: 0.85, count: 150 }), alphaTest: 0.42, side: THREE.DoubleSide,
+      roughness: 0.95, metalness: 0, envMapIntensity: 0.3,
+    }),
+    copaArvore3:  new THREE.MeshStandardMaterial({
+      map: leafCardTexture('#3f5d3a', { narrow: true, count: 170, leafScale: 1.15 }), alphaTest: 0.42, side: THREE.DoubleSide,
+      roughness: 0.95, metalness: 0, envMapIntensity: 0.28,
+    }),
+    // Gramínea de primeiro plano: lâminas soltas, mais claras e secas.
+    graminea:     new THREE.MeshStandardMaterial({
+      map: leafCardTexture('#8a9a55', { narrow: true, count: 90, leafScale: 1.5 }), alphaTest: 0.4, side: THREE.DoubleSide,
+      roughness: 0.98, metalness: 0, envMapIntensity: 0.25,
+    }),
     bordaPiscina: new THREE.MeshStandardMaterial({ map: stoneVeinTexture('#e0dcd4', '#c9c2b4'), roughness: 0.7, metalness: 0 }),
     revestPiscina:new THREE.MeshStandardMaterial({ color: 0x1d4f5c, roughness: 0.35, metalness: 0, envMapIntensity: 0.4 }),
     vaso:         new THREE.MeshStandardMaterial({ color: 0xd8d2c6, roughness: 0.8, metalness: 0 }),
@@ -1619,10 +1902,15 @@ function buildMaterials() {
       // refração. Somar transparent+opacity faz o mesmo trabalho duas
       // vezes, de forma ambígua. Aqui transmission manda sozinha; o
       // fallback opaco fica em adaptMaterialsToQuality() para GPU fraca.
-      color: 0xa8c6d4, roughness: 0.06, metalness: 0,
-      transmission: 0.72, thickness: 0.05, ior: 1.5,
+      // O tom anterior (0xa8c6d4) era um ciano forte: a casa inteira lia
+      // como aquário nos renders. Vidro arquitetônico low-e real é quase
+      // neutro, com um resto de verde-acinzentado, e quem dá a cor é o
+      // que ele REFLETE (céu, vegetação) — não um filtro azul no material.
+      // Daí o color quase neutro + envMapIntensity mais alto.
+      color: 0xd6dedb, roughness: 0.045, metalness: 0,
+      transmission: 0.82, thickness: 0.02, ior: 1.52,
       transparent: false, opacity: 1.0, side: THREE.DoubleSide,
-      envMapIntensity: 0.6,
+      envMapIntensity: 1.0,
       emissive: 0x000000, emissiveIntensity: 0,
     }),
     // ÁGUA — reconstruída.
@@ -1653,10 +1941,23 @@ function buildMaterials() {
     }),
   };
   waterNormalMap = M.agua.normalMap;
-  M.gramado.map.repeat.set(34, 34);
+  // 450 repetições sobre o plano de 900 m = 2 m por ladrilho. Perto da
+  // câmera a lâmina de grama tem tamanho plausível; o padrão que essa
+  // repetição criaria é dissolvido por applyMacroVariation() logo abaixo.
+  M.gramado.map.repeat.set(450, 450);
+  M.gramado.normalMap.repeat.set(450, 450);
+  applyMacroVariation(M.gramado, 11.0, 0.16);
   M.terraco.map.repeat.set(7, 5);
   M.caminho.map.repeat.set(2, 7);
   M.cascalho.map.repeat.set(5, 4);
+  applyMacroVariation(M.cascalho, 3.5, 0.10);
+
+  // Sem anisotropia, uma textura repetida 450x vira ruído cintilante em
+  // ângulo rasante — que é exatamente como se olha um gramado.
+  const aniso = (renderer && renderer.capabilities)
+    ? Math.min(8, renderer.capabilities.getMaxAnisotropy()) : 1;
+  [M.gramado.map, M.gramado.normalMap, M.terraco.map, M.caminho.map, M.cascalho.map]
+    .forEach(t => { if (t) t.anisotropy = aniso; });
 
   glassMaterial = M.vidro;
   waterMaterial = M.agua;
@@ -3133,30 +3434,122 @@ function buildUpperLevel() {
 // "flutuando": tronco nasce em y=0 local e a copa é composta por 2-3
 // lobos orgânicos que sobrepõem o topo do tronco, sem gap).
 // ============================================================
-function createTree(trunkH, canopyR, canopyMat) {
-  const g = new THREE.Group();
-  const trunk = new THREE.Mesh(
-    new THREE.CylinderGeometry(canopyR * 0.11, canopyR * 0.16, trunkH, 7),
-    M.troncoArvore
-  );
-  trunk.position.y = trunkH / 2;
-  trunk.castShadow = true;
-  g.add(trunk);
+// ------------------------------------------------------------
+// EMISSORES DE VEGETAÇÃO
+// Nada aqui cria Mesh: cada função só empilha TRANSFORMAÇÕES nas listas
+// que buildLandscaping() converte em InstancedMesh no final. Uma árvore
+// com 22 cartões de folha continua custando zero draw call próprio.
+// ------------------------------------------------------------
+const _cardQ = new THREE.Quaternion();
+const _cardSpin = new THREE.Quaternion();
+const _cardEu = new THREE.Euler();
+const _cardUp = new THREE.Vector3(0, 0, 1);
+const _cardDir = new THREE.Vector3();
+const _zAxis = new THREE.Vector3(0, 0, 1);
 
-  const lobes = 3;
-  for (let i = 0; i < lobes; i++) {
-    const r = canopyR * (0.68 + Math.random() * 0.36);
-    const foliage = new THREE.Mesh(new THREE.IcosahedronGeometry(r, 0), canopyMat);
-    foliage.position.set(
-      (Math.random() - 0.5) * canopyR * 0.55,
-      trunkH + r * 0.5 + (Math.random() - 0.5) * canopyR * 0.25,
-      (Math.random() - 0.5) * canopyR * 0.55
-    );
-    foliage.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI);
-    foliage.castShadow = true;
-    g.add(foliage);
+// Empilha um cartão cuja normal aponta para `dir`, com giro aleatório no
+// próprio plano (senão todos os cartões repetem o mesmo recorte).
+function pushCard(out, x, y, z, dir, size, sizeY) {
+  _cardDir.copy(dir).normalize();
+  _cardQ.setFromUnitVectors(_cardUp, _cardDir);
+  _cardSpin.setFromAxisAngle(_zAxis, Math.random() * Math.PI * 2);
+  _cardQ.multiply(_cardSpin);
+  _cardEu.setFromQuaternion(_cardQ);
+  out.push({
+    x, y, z,
+    rx: _cardEu.x, ry: _cardEu.y, rz: _cardEu.z,
+    sx: size, sy: sizeY === undefined ? size : sizeY, sz: 1,
+  });
+}
+
+// Uma árvore: tronco cônico, 2-4 galhos e uma casca de cartões de folha
+// distribuída num elipsoide. Os cartões da casca têm normal apontando
+// para fora, então recebem a luz do sol como uma superfície de copa —
+// e alguns cartões internos preenchem para a copa não ficar oca.
+const _tDir = new THREE.Vector3();
+function emitTree(cardOut, trunkOut, x, z, opts) {
+  const o = opts || {};
+  const trunkH = o.trunkH || (2.6 + Math.random() * 2.2);
+  const canopyR = o.canopyR || (1.15 + Math.random() * 0.7);
+  const cards = o.cards === undefined ? 20 : o.cards;
+  const lean = o.lean === undefined ? 0.05 : o.lean;
+  const trunkR = canopyR * (o.trunkR || 0.12);
+
+  // tronco (levemente inclinado — nenhuma árvore cresce no prumo)
+  const lx = (Math.random() - 0.5) * lean, lz = (Math.random() - 0.5) * lean;
+  trunkOut.push({
+    x: x + lx * trunkH * 0.5, y: trunkH / 2, z: z + lz * trunkH * 0.5,
+    rx: lz * 2, rz: -lx * 2,
+    sx: trunkR, sy: trunkH, sz: trunkR,
+  });
+
+  // galhos saindo do terço superior do tronco
+  const nBranch = o.branches === undefined ? (2 + Math.floor(Math.random() * 3)) : o.branches;
+  for (let b = 0; b < nBranch; b++) {
+    const az = (b / nBranch) * Math.PI * 2 + Math.random() * 0.9;
+    const tilt = 0.55 + Math.random() * 0.45;             // do vertical
+    const len = canopyR * (0.85 + Math.random() * 0.6);
+    const baseY = trunkH * (0.62 + Math.random() * 0.28);
+    const hx = Math.sin(tilt) * Math.cos(az) * len * 0.5;
+    const hz = Math.sin(tilt) * Math.sin(az) * len * 0.5;
+    const hy = Math.cos(tilt) * len * 0.5;
+    trunkOut.push({
+      x: x + hx, y: baseY + hy, z: z + hz,
+      rx: Math.cos(az) * tilt, ry: 0, rz: -Math.sin(az) * tilt,
+      sx: trunkR * 0.5, sy: len, sz: trunkR * 0.5,
+    });
   }
-  return g;
+
+  // copa
+  const cy = trunkH + canopyR * (o.canopyLift || 0.52);
+  const ry = canopyR * (o.canopyFlat || 0.78);   // elipsoide achatado
+  for (let i = 0; i < cards; i++) {
+    // 70% na casca externa, 30% no miolo — copa cheia sem ficar sólida
+    const shell = i < cards * 0.7;
+    const u = Math.random() * 2 - 1;
+    const phi = Math.random() * Math.PI * 2;
+    const s = Math.sqrt(1 - u * u);
+    const rr = shell ? (0.78 + Math.random() * 0.22) : Math.random() * 0.7;
+    _tDir.set(s * Math.cos(phi), u * 0.85, s * Math.sin(phi));
+    const px = x + _tDir.x * canopyR * rr;
+    const py = cy + _tDir.y * ry * rr;
+    const pz = z + _tDir.z * canopyR * rr;
+    const cs = canopyR * (o.cardScale || 1.05) * (0.72 + Math.random() * 0.5);
+    pushCard(cardOut, px, py, pz, _tDir, cs);
+  }
+}
+
+// Arbusto: mesma ideia sem tronco, mais achatado e mais denso embaixo.
+function emitShrub(cardOut, x, z, scale) {
+  const s = scale || 1;
+  const n = 5 + Math.floor(Math.random() * 4);
+  for (let i = 0; i < n; i++) {
+    const u = Math.random() * 0.9;
+    const phi = Math.random() * Math.PI * 2;
+    const rr = Math.sqrt(1 - u * u);
+    _tDir.set(rr * Math.cos(phi), u * 0.8 + 0.15, rr * Math.sin(phi));
+    pushCard(cardOut,
+      x + _tDir.x * 0.36 * s, 0.22 * s + _tDir.y * 0.26 * s, z + _tDir.z * 0.36 * s,
+      _tDir, (0.52 + Math.random() * 0.3) * s);
+  }
+}
+
+// Gramínea de primeiro plano: pares de cartões cruzados, verticais.
+// Cruzado (e não um cartão só) porque um quad isolado desaparece quando
+// visto de canto — o defeito clássico de billboard estático.
+function emitGrassTuft(cardOut, x, z, scale) {
+  const s = scale || 1;
+  const h = (0.42 + Math.random() * 0.34) * s;
+  const w = h * (0.8 + Math.random() * 0.5);
+  const base = Math.random() * Math.PI;
+  for (let k = 0; k < 2; k++) {
+    const a = base + k * Math.PI / 2;
+    cardOut.push({
+      x, y: h * 0.5, z,
+      rx: 0, ry: a, rz: 0,
+      sx: w, sy: h, sz: 1,
+    });
+  }
 }
 
 // Distância de um ponto ao segmento câmera->alvo, no plano XZ.
@@ -3191,122 +3584,145 @@ function blocksAnyCamera(px, pz, margin) {
 function buildLandscaping() {
   const g = new THREE.Group();
 
-  // MEDIDO: a versão anterior gerava ~259 meshes só de folhas de grama e
-  // ~138 de folhagem — cada uma um draw call. Agora tudo é coletado como
-  // transformações e emitido como InstancedMesh (1 draw call por grupo).
-  const bladeT = [], foliageT = [], foliageT2 = [], trunkT = [], shrubT = [];
+  // Tudo aqui é coletado como TRANSFORMAÇÕES e emitido como
+  // InstancedMesh no final: uma árvore de 20 cartões de folha não custa
+  // draw call próprio, custa 20 matrizes num buffer.
+  const canopyA = [], canopyB = [], canopyC = [], trunkT = [], shrubT = [], grassT = [];
 
-  // ---- PLANO DE FUNDO: árvores agrupadas em maciços ----
+  // Cartões por copa conforme o tier — silhueta é o que mais importa em
+  // aparelho fraco, então mesmo em 'low' a árvore continua sendo cartões
+  // (só que menos), nunca volta a ser um cone.
+  const CARDS = Quality.level === 'low' ? 11 : Quality.level === 'medium' ? 15 : 22;
+
+  // ---- MACIÇOS ARBÓREOS ----
+  // Mais maciços e mais fundos que antes: o lote precisa ter vizinhança
+  // arborizada, senão a casa fica num campo aberto e some a privacidade,
+  // que é justamente um argumento de venda deste terreno.
   const groves = [
-    { cx: -11, cz: -8.5, n: 4, spread: 3.0 },
-    { cx: -2,  cz: -10.5, n: 3, spread: 3.0 },
-    { cx: 16,  cz: -12.0, n: 3, spread: 2.6 },
-    { cx: 15.5, cz: 3,   n: 3, spread: 3.2 },
-    { cx: -17,  cz: 8,   n: 4, spread: 3.2 },
-    { cx: -9,   cz: 15,  n: 2, spread: 2.4 },
-    { cx: 4,    cz: 15.5, n: 2, spread: 2.2 },
+    { cx: -11.5, cz: -9.0,  n: 5, spread: 3.4, sp: 0 },
+    { cx: -2.5,  cz: -11.5, n: 4, spread: 3.2, sp: 2 },
+    { cx: 16.5,  cz: -12.5, n: 4, spread: 3.0, sp: 0 },
+    { cx: 16.0,  cz: 3.0,   n: 4, spread: 3.4, sp: 1 },
+    { cx: -17.5, cz: 8.0,   n: 5, spread: 3.6, sp: 1 },
+    { cx: -9.5,  cz: 16.0,  n: 4, spread: 3.0, sp: 2 },
+    { cx: 4.5,   cz: 16.5,  n: 4, spread: 2.8, sp: 0 },
+    { cx: -20.0, cz: -4.0,  n: 5, spread: 4.0, sp: 2 },
+    { cx: 21.0,  cz: -3.0,  n: 5, spread: 4.0, sp: 1 },
+    { cx: 12.0,  cz: 18.0,  n: 4, spread: 3.4, sp: 0 },
+    { cx: -16.0, cz: -14.0, n: 4, spread: 3.4, sp: 1 },
+    { cx: 0.0,   cz: 22.0,  n: 5, spread: 4.4, sp: 2 },
   ];
+  const canopyLists = [canopyA, canopyB, canopyC];
   groves.forEach((gr, gi) => {
     for (let i = 0; i < gr.n; i++) {
       const a = (i / gr.n) * Math.PI * 2 + gi;
       const r = gr.spread * (0.35 + Math.random() * 0.65);
       const x = gr.cx + Math.cos(a) * r, z = gr.cz + Math.sin(a) * r;
       if (blocksAnyCamera(x, z, 1.5)) continue;   // não planta na frente da câmera
-      const trunkH = 2.4 + Math.random() * 2.0;
-      const canopyR = 0.95 + Math.random() * 0.6;
-      trunkT.push({ x, y: trunkH / 2, z, sx: canopyR * 0.16, sy: trunkH, sz: canopyR * 0.16 });
-      const lobes = 3;
-      for (let k = 0; k < lobes; k++) {
-        const lr = canopyR * (0.68 + Math.random() * 0.36);
-        const t = {
-          x: x + (Math.random() - 0.5) * canopyR * 0.55,
-          y: trunkH + lr * 0.5 + (Math.random() - 0.5) * canopyR * 0.25,
-          z: z + (Math.random() - 0.5) * canopyR * 0.55,
-          rx: (Math.random() - 0.5) * 0.22, ry: Math.random() * Math.PI * 2, rz: (Math.random() - 0.5) * 0.22,
-          sx: lr * 1.25, sy: lr * (0.62 + Math.random() * 0.22), sz: lr * 1.25,
-        };
-        ((i + k) % 2 === 0 ? foliageT : foliageT2).push(t);
-      }
-    }
-  });
-
-  // ---- PLANO INTERMEDIÁRIO: arbustos ----
-  const shrubSpots = [];
-  for (let x = -14.5; x <= 15.5; x += 1.5) shrubSpots.push([x + (Math.random() - 0.5) * 0.4, -9.4 + (Math.random() - 0.5) * 0.5]);
-  [[-13.6, -3], [-13.6, 0.5], [-13.4, 4], [14.2, -3], [14.4, 1], [14.2, 5]].forEach(p => shrubSpots.push(p));
-  shrubSpots.forEach(([sx, sz]) => {
-    if (blocksAnyCamera(sx, sz, 0.7)) return;
-    const s = 0.9 + Math.random() * 0.5;
-    const lobes = 2 + Math.floor(Math.random() * 2);
-    for (let i = 0; i < lobes; i++) {
-      const r = (0.28 + Math.random() * 0.18) * s;
-      shrubT.push({
-        x: sx + (Math.random() - 0.5) * 0.3 * s, y: r * 0.75, z: sz + (Math.random() - 0.5) * 0.3 * s,
-        rx: Math.random() * 3, ry: Math.random() * 3, rz: Math.random() * 3,
-        sx: r, sy: r * 0.78, sz: r,
+      // Espécie majoritária por maciço, com exemplares de outra espécie
+      // misturados: maciço 100% homogêneo lê como carimbo repetido.
+      const sp = Math.random() < 0.72 ? gr.sp : Math.floor(Math.random() * 3);
+      const tall = sp === 2;                       // a "espécie 3" é esguia
+      emitTree(canopyLists[sp], trunkT, x, z, {
+        trunkH: tall ? 3.8 + Math.random() * 2.6 : 2.4 + Math.random() * 2.2,
+        canopyR: tall ? 1.0 + Math.random() * 0.5 : 1.2 + Math.random() * 0.85,
+        canopyFlat: tall ? 1.25 : 0.72 + Math.random() * 0.25,
+        cards: CARDS,
       });
     }
   });
 
-  // ---- PRIMEIRO PLANO: gramíneas ----
+  // ---- ÁRVORES SOLITÁRIAS DE COMPOSIÇÃO ----
+  // Exemplares isolados perto da casa: é o que dá escala à fachada e
+  // sombra no deck. Colocadas à mão, não sorteadas.
+  [
+    [-15.2, 2.0, 0], [14.8, 9.5, 1], [-6.0, 19.0, 2], [19.5, 12.0, 0],
+  ].forEach(([x, z, sp]) => {
+    if (blocksAnyCamera(x, z, 1.2)) return;
+    emitTree(canopyLists[sp], trunkT, x, z, {
+      trunkH: 3.4 + Math.random() * 1.4, canopyR: 1.6 + Math.random() * 0.6,
+      cards: CARDS + 4, branches: 4,
+    });
+  });
+
+  // ---- ARBUSTOS ----
+  const shrubSpots = [];
+  for (let x = -14.5; x <= 15.5; x += 1.5) shrubSpots.push([x + (Math.random() - 0.5) * 0.4, -9.4 + (Math.random() - 0.5) * 0.5]);
+  [[-13.6, -3], [-13.6, 0.5], [-13.4, 4], [14.2, -3], [14.4, 1], [14.2, 5]].forEach(p => shrubSpots.push(p));
+  // massa arbustiva sob os maciços — transição do gramado para a mata
+  groves.forEach(gr => {
+    for (let i = 0; i < 4; i++) {
+      shrubSpots.push([
+        gr.cx + (Math.random() - 0.5) * gr.spread * 2.4,
+        gr.cz + (Math.random() - 0.5) * gr.spread * 2.4,
+      ]);
+    }
+  });
+  shrubSpots.forEach(([sx, sz]) => {
+    if (blocksAnyCamera(sx, sz, 0.7)) return;
+    emitShrub(shrubT, sx, sz, 0.85 + Math.random() * 0.6);
+  });
+
+  // ---- GRAMÍNEAS DE PRIMEIRO PLANO ----
   const tuftLines = [
-    { x0: -12.4, z0: 8.2, x1: -12.4, z1: 15.4, n: 9 },
-    { x0: 3.0,  z0: 7.6, x1: 3.0,  z1: 15.0, n: 8 },
-    { x0: -12.0, z0: 16.4, x1: 3.0, z1: 16.4, n: 12 },
-    { x0: 13.0, z0: -6.5, x1: 13.0, z1: 2.0, n: 8 },
+    { x0: -12.4, z0: 8.2, x1: -12.4, z1: 15.4, n: 14 },
+    { x0: 3.0,  z0: 7.6, x1: 3.0,  z1: 15.0, n: 12 },
+    { x0: -12.0, z0: 16.4, x1: 3.0, z1: 16.4, n: 18 },
+    { x0: 13.0, z0: -6.5, x1: 13.0, z1: 2.0, n: 12 },
   ];
   tuftLines.forEach(l => {
     for (let i = 0; i < l.n; i++) {
       const f = i / (l.n - 1 || 1);
-      const s = 0.85 + Math.random() * 0.6;
-      const cx = l.x0 + (l.x1 - l.x0) * f + (Math.random() - 0.5) * 0.5;
-      const cz = l.z0 + (l.z1 - l.z0) * f + (Math.random() - 0.5) * 0.5;
-      for (let b = 0; b < 6; b++) {
-        const bh = (0.32 + Math.random() * 0.3) * s;
-        const a = Math.random() * Math.PI * 2;
-        bladeT.push({
-          x: cx + Math.cos(a) * 0.07 * s, y: bh / 2, z: cz + Math.sin(a) * 0.07 * s,
-          rx: (Math.random() - 0.5) * 0.5, rz: (Math.random() - 0.5) * 0.5,
-          sx: 0.02 * s, sy: bh, sz: 0.02 * s,
-        });
+      const cx = l.x0 + (l.x1 - l.x0) * f + (Math.random() - 0.5) * 0.6;
+      const cz = l.z0 + (l.z1 - l.z0) * f + (Math.random() - 0.5) * 0.6;
+      // touceira = alguns tufos próximos, não uma moita única
+      for (let b = 0; b < 3; b++) {
+        emitGrassTuft(grassT,
+          cx + (Math.random() - 0.5) * 0.55,
+          cz + (Math.random() - 0.5) * 0.55,
+          0.9 + Math.random() * 0.5);
       }
     }
   });
 
-  // Emissão instanciada — geometria unitária escalada por instância.
-  // Vegetação pequena NÃO projeta sombra: eram centenas de objetos
-  // re-renderizados no shadow map a cada frame, por ganho visual mínimo.
-  const unitBox = sharedBox(1, 1, 1);
-  // A folhagem lia como cristais facetados. Como está instanciada, subir
-  // a subdivisão custa vértices mas NÃO custa draw call — o gargalo real.
-  // detail:1 = 80 faces por lobo (era 20), silhueta bem mais orgânica.
-  const foliageDetail = (Quality.level === 'low' || Quality.level === 'medium') ? 0 : 1;
-  // Icosaedro puro lê como "bola de folha" cristalina. Cone achatado com
-  // base larga tem silhueta de copa: mais largo embaixo, afinando no
-  // topo — que é como uma árvore realmente se recorta contra o céu.
-  const unitCanopy = new THREE.ConeGeometry(1, 1.5, foliageDetail ? 9 : 7, 1);
-  const unitIco = new THREE.IcosahedronGeometry(1, foliageDetail);
-  const unitIcoLow = new THREE.IcosahedronGeometry(1, 0);
-  // vento: gramínea balança mais que arbusto, que balança mais que copa
-  applyWind(M.copaArvore, 0.055);
-  applyWind(M.copaArvore2, 0.045);
-  const im1 = buildInstanced(unitBox, M.copaArvore, bladeT, false);
-  if (im1) g.add(im1);
-  // Árvore modelada no Blender substitui a copa procedural, mantendo
-  // instancing: extrai a geometria do GLB e instancia normalmente.
-  let treeGeo = null, treeMat = null;
-  if (Assets) {
-    const t = Assets.model('tree');
-    if (t) t.traverse(o => { if (o.isMesh && !treeGeo) { treeGeo = o.geometry; treeMat = o.material; } });
+  // Tufos esparsos quebrando a borda entre gramado e pavimentação —
+  // grama que encosta no piso em linha reta perfeita denuncia CGI.
+  for (let i = 0; i < 90; i++) {
+    const a = Math.random() * Math.PI * 2;
+    const rr = 9 + Math.random() * 16;
+    const tx = Math.cos(a) * rr, tz = 4 + Math.sin(a) * rr;
+    if (blocksAnyCamera(tx, tz, 0.6)) continue;
+    emitGrassTuft(grassT, tx, tz, 0.55 + Math.random() * 0.45);
   }
-  const im2 = buildInstanced(unitCanopy, M.copaArvore, foliageT, true);
-  if (im2) g.add(im2);
-  const im3 = buildInstanced(unitCanopy, M.copaArvore2, foliageT2, true);
-  if (im3) g.add(im3);
-  const im4 = buildInstanced(sharedCyl(1, 1, 1, 9), M.troncoArvore, trunkT, true);
-  if (im4) g.add(im4);
-  const im5 = buildInstanced(unitIcoLow, M.copaArvore2, shrubT, false);
-  if (im5) g.add(im5);
+
+  // ---- EMISSÃO ----
+  // Cartão de folha = 1 quad. Um PlaneGeometry unitário compartilhado
+  // por todos: copas, arbustos e gramíneas usam a mesma geometria.
+  const unitCard = new THREE.PlaneGeometry(1, 1);
+  const unitIcoLow = new THREE.IcosahedronGeometry(1, 0);
+
+  // vento: gramínea balança mais que arbusto, que balança mais que copa
+  applyWind(M.copaArvore, 0.05);
+  applyWind(M.copaArvore2, 0.045);
+  applyWind(M.copaArvore3, 0.055);
+  applyWind(M.graminea, 0.09);
+
+  // Tronco cônico de verdade (topo 55% da base), não cilindro reto.
+  const trunkGeo = sharedCyl(0.55, 1, 1, 8);
+
+  [[canopyA, M.copaArvore], [canopyB, M.copaArvore2], [canopyC, M.copaArvore3]]
+    .forEach(([list, mat]) => {
+      const im = buildInstanced(unitCard, mat, list, true);
+      if (im) g.add(im);
+    });
+  const imTrunk = buildInstanced(trunkGeo, M.troncoArvore, trunkT, true);
+  if (imTrunk) g.add(imTrunk);
+  // Arbusto e gramínea não projetam sombra: são centenas de quads no
+  // shadow map por um ganho que a sombra de contato do gramado já dá.
+  const imShrub = buildInstanced(unitCard, M.copaArvore2, shrubT, false);
+  if (imShrub) g.add(imShrub);
+  const imGrass = buildInstanced(unitCard, M.graminea, grassT, false);
+  if (imGrass) g.add(imGrass);
 
   // Pedras decorativas (poucas, mantidas como meshes normais)
   for (const [rx, rz, rs] of [[-13.0, 6.4, 0.5], [-11.6, 7.0, 0.32], [13.6, -1.5, 0.45], [12.4, 6.2, 0.38]]) {
@@ -3541,56 +3957,93 @@ function curb(w, d, cx, cz, h) {
 function buildDistantLandscape() {
   const g = new THREE.Group();
 
-  // Relevo suave no horizonte, escurecido e dessaturado pela distância
+  // ------------------------------------------------------------
+  // BUG ENCONTRADO RENDERIZANDO (o horizonte "cortado" da V9)
+  // Os morros eram IcosahedronGeometry posicionados em y = -9 a -13 com
+  // escala vertical 5,5 a 10 — ou seja, o TOPO ficava em y ≈ -3, abaixo
+  // do nível do terreno. Estavam literalmente enterrados; o horizonte
+  // não tinha nada além do gramado terminando no céu.
+  //
+  // Correção em três partes:
+  // 1. relevo com base em y=0 e altura real (14 a 40 m), a 220-430 m;
+  // 2. o gramado de fundo passou de 260 m para 900 m (buildGround), para
+  //    o terreno alcançar visualmente a base do relevo em vez de acabar;
+  // 3. a névoa exponencial já existente faz o resto — o relevo entra
+  //    dessaturado e claro, que é perspectiva aérea de verdade.
+  // ------------------------------------------------------------
   const hillMat = new THREE.MeshStandardMaterial({
-    color: 0x6f7f63, roughness: 1.0, metalness: 0, envMapIntensity: 0.2, fog: true,
+    color: 0x74856a, roughness: 1.0, metalness: 0, envMapIntensity: 0.18,
+    flatShading: false, fog: true,
   });
-  const hillGeo = new THREE.IcosahedronGeometry(1, 0);
+  // Esfera de baixa resolução achatada lê como encosta arredondada; o
+  // icosaedro de 20 faces lia como pedra facetada.
+  const hillGeo = new THREE.SphereGeometry(1, 12, 8);
   const hills = [];
-  for (let i = 0; i < 26; i++) {
-    const a = (i / 26) * Math.PI * 2 + Math.random() * 0.2;
-    const r = 175 + Math.random() * 90;   // bem além do lote
-    const w = 34 + Math.random() * 46;
-    hills.push({
-      x: Math.cos(a) * r, y: -9 - Math.random() * 4, z: Math.sin(a) * r,
-      ry: Math.random() * Math.PI,
-      sx: w, sy: 5.5 + Math.random() * 4.5, sz: w * 0.7,   // achatado
-    });
-  }
-  const hillMesh = buildInstanced(hillGeo, hillMat, hills, false);
-  if (hillMesh) g.add(hillMesh);
-
-  // Massa de árvores distante — silhueta, não detalhe
-  const farMat = new THREE.MeshStandardMaterial({
-    color: 0x4c6042, roughness: 1.0, metalness: 0, envMapIntensity: 0.15, fog: true,
-  });
-  const farGeo = new THREE.ConeGeometry(1, 1.6, 5, 1);
-  const far = [];
-  for (let ring = 0; ring < 3; ring++) {
-    const rBase = 58 + ring * 26;
-    const count = 70 + ring * 40;
-    for (let i = 0; i < count; i++) {
-      const a = (i / count) * Math.PI * 2 + Math.random() * 0.4;
-      const r = rBase + Math.random() * 14;
-      const sc = 2.2 + Math.random() * 2.6;
-      far.push({
-        x: Math.cos(a) * r, y: sc * 0.55, z: Math.sin(a) * r,
-        ry: Math.random() * Math.PI, sx: sc * 0.85, sy: sc * 1.5, sz: sc * 0.85,
+  for (let ring = 0; ring < 2; ring++) {
+    const n = ring === 0 ? 22 : 16;
+    for (let i = 0; i < n; i++) {
+      const a = (i / n) * Math.PI * 2 + Math.random() * 0.35 + ring * 0.7;
+      const r = (ring === 0 ? 225 : 340) + Math.random() * 95;
+      const w = (ring === 0 ? 90 : 150) + Math.random() * 110;
+      const h = (ring === 0 ? 16 : 26) + Math.random() * (ring === 0 ? 16 : 24);
+      hills.push({
+        x: Math.cos(a) * r, y: -h * 0.12, z: Math.sin(a) * r,   // base enterrada de leve
+        ry: Math.random() * Math.PI,
+        sx: w, sy: h, sz: w * (0.6 + Math.random() * 0.3),
       });
     }
   }
-  const farMesh = buildInstanced(farGeo, farMat, far, false);
+  const hillMesh = buildInstanced(hillGeo, hillMat, hills, false);
+  if (hillMesh) { hillMesh.receiveShadow = false; g.add(hillMesh); }
+
+  // ------------------------------------------------------------
+  // MASSA ARBÓREA DISTANTE
+  // Cones foram substituídos por cartões cruzados com o mesmo recorte de
+  // folha das árvores próximas. À distância o que importa é a silhueta,
+  // e silhueta de cone é o que fazia a mata de fundo parecer cenário de
+  // jogo. Cada árvore são 2 cartões cruzados — 1 draw call para todas.
+  // ------------------------------------------------------------
+  const farMat = new THREE.MeshStandardMaterial({
+    map: leafCardTexture('#46603c', { count: 200, leafScale: 1.4 }),
+    alphaTest: 0.45, side: THREE.DoubleSide,
+    roughness: 1.0, metalness: 0, envMapIntensity: 0.15, fog: true,
+  });
+  const unitCard = new THREE.PlaneGeometry(1, 1);
+  const far = [];
+  const rings = Quality.level === 'low' ? 3 : 4;
+  for (let ring = 0; ring < rings; ring++) {
+    const rBase = 46 + ring * 30;
+    const count = 90 + ring * 55;
+    for (let i = 0; i < count; i++) {
+      const a = (i / count) * Math.PI * 2 + Math.random() * 0.5;
+      const r = rBase + Math.random() * 22;
+      const sc = 3.0 + Math.random() * 3.4;
+      const x = Math.cos(a) * r, z = Math.sin(a) * r;
+      // dois cartões cruzados: a árvore não some quando vista de canto
+      const base = Math.random() * Math.PI;
+      for (let k = 0; k < 2; k++) {
+        far.push({
+          x, y: sc * 0.5, z, ry: base + k * Math.PI / 2,
+          sx: sc * 0.9, sy: sc, sz: 1,
+        });
+      }
+    }
+  }
+  const farMesh = buildInstanced(unitCard, farMat, far, false);
   if (farMesh) g.add(farMesh);
 
   scene.add(g);
   return g;
 }
-
 function buildGround() {
   const g = new THREE.Group();
 
   // base — gramado de fundo, mais discreto do que antes
-  g.add(groundPlane(260, 260, 0, 4, M.gramado, -0.06));
+  // 900 m em vez de 260: o terreno precisa alcançar a base do relevo
+  // distante, senão volta o horizonte cortado. São 2 triângulos — o
+  // custo é a névoa fazendo o trabalho de dissolver o fundo, não o
+  // número de vértices.
+  g.add(groundPlane(900, 900, 0, 4, M.gramado, -0.06));
 
   // terraço sul (fachadas de vidro da ala social e da suíte) — a faixa de
   // transição em travertino que a Regra 8 pediu, entre a casa e o jardim
