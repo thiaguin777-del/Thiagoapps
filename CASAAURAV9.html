@@ -503,14 +503,17 @@ const ASSET_BASE = (new URLSearchParams(location.search).get('assets') || './ass
 const ASSET_MANIFEST = {
   // --- Texturas PBR (substituem as texturas de canvas) ---
   textures: {
-    concreto:   { base: 'concrete_diff.jpg', normal: 'concrete_nor.jpg', rough: 'concrete_rough.jpg', repeat: [4, 4] },
-    cumaru:     { base: 'wood_dark_diff.jpg', normal: 'wood_dark_nor.jpg', rough: 'wood_dark_rough.jpg', repeat: [2, 6] },
-    ipe:        { base: 'wood_deck_diff.jpg', normal: 'wood_deck_nor.jpg', rough: 'wood_deck_rough.jpg', repeat: [1, 8] },
-    madeiraClara:{ base: 'wood_light_diff.jpg', normal: 'wood_light_nor.jpg', rough: 'wood_light_rough.jpg', repeat: [3, 3] },
-    travertino: { base: 'travertine_diff.jpg', normal: 'travertine_nor.jpg', rough: 'travertine_rough.jpg', repeat: [3, 3] },
+    // repeat: materiais aplicados em box/rbox usam [1,1] porque a escala
+    // vem da UV em metros (applyWorldUV/TILE_M). Só gramado e terraço,
+    // que vivem em PlaneGeometry com UV 0..1, mantêm repetição própria.
+    concreto:   { base: 'concrete_diff.jpg', normal: 'concrete_nor.jpg', rough: 'concrete_rough.jpg', repeat: [1, 1] },
+    cumaru:     { base: 'wood_dark_diff.jpg', normal: 'wood_dark_nor.jpg', rough: 'wood_dark_rough.jpg', repeat: [1, 1] },
+    ipe:        { base: 'wood_deck_diff.jpg', normal: 'wood_deck_nor.jpg', rough: 'wood_deck_rough.jpg', repeat: [1, 1] },
+    madeiraClara:{ base: 'wood_light_diff.jpg', normal: 'wood_light_nor.jpg', rough: 'wood_light_rough.jpg', repeat: [1, 1] },
+    travertino: { base: 'travertine_diff.jpg', normal: 'travertine_nor.jpg', rough: 'travertine_rough.jpg', repeat: [1, 1] },
     bancada:    { base: 'marble_diff.jpg', normal: 'marble_nor.jpg', rough: 'marble_rough.jpg', repeat: [1, 1] },
-    estuque:    { base: 'stucco_diff.jpg', normal: 'stucco_nor.jpg', rough: 'stucco_rough.jpg', repeat: [6, 6] },
-    gramado:    { base: 'grass_diff.jpg', normal: 'grass_nor.jpg', rough: null, repeat: [34, 34] },
+    estuque:    { base: 'stucco_diff.jpg', normal: 'stucco_nor.jpg', rough: 'stucco_rough.jpg', repeat: [1, 1] },
+    gramado:    { base: 'grass_diff.jpg', normal: 'grass_nor.jpg', rough: null, repeat: [450, 450] },
     terraco:    { base: 'pavers_diff.jpg', normal: 'pavers_nor.jpg', rough: 'pavers_rough.jpg', repeat: [7, 5] },
   },
   // --- Modelos GLB (substituem o mobiliário procedural) ---
@@ -625,6 +628,21 @@ function createAssetSystem() {
     try {
       await Promise.race([A.loadEmbedded(), new Promise(r => setTimeout(r, 10000))]);
     } catch (e) { A.errors.push('embedded: ' + e.message); }
+    // ------------------------------------------------------------
+    // SONDA ÚNICA ANTES DE PEDIR 34 ARQUIVOS
+    // MEDIDO no console do teste: 34 requisições 404 em TODO
+    // carregamento (9 texturas x 3 mapas + 7 modelos), porque a pasta
+    // ./assets/ normalmente não existe — é opcional por projeto. Cada
+    // 404 é uma ida e volta de rede antes de a cena poder começar.
+    // Agora uma sonda só decide: se o primeiro arquivo não está lá, a
+    // pasta não está lá, e as outras 33 requisições não acontecem.
+    // ------------------------------------------------------------
+    const sonda = await tryTexture('concrete_diff.jpg', true, null);
+    if (!sonda) {
+      A.available = (A.loaded.textures + A.loaded.models) > 0;
+      return A;
+    }
+
     const jobs = [];
     for (const key in ASSET_MANIFEST.textures) {
       const t = ASSET_MANIFEST.textures[key];
@@ -658,7 +676,9 @@ function createAssetSystem() {
       if (!mat) continue;
       const set = A.textures[key];
       mat.map = set.base;
-      if (set.normal) { mat.normalMap = set.normal; mat.normalScale = new THREE.Vector2(1, 1); }
+      // preserva o normalScale autoral: sobrescrever com (1,1) fazia a
+      // textura externa entrar com relevo muito mais forte que a procedural
+      if (set.normal) mat.normalMap = set.normal;
       if (set.rough) mat.roughnessMap = set.rough;
       mat.needsUpdate = true;
       n++;
@@ -1574,17 +1594,19 @@ function stoneVeinTexture(baseHex, veinHex, opts) {
     ctx.fillStyle = baseHex;
     ctx.fillRect(0, 0, s, s);
 
-    // 1. manchas largas de tom — a variação que se enxerga de longe
-    for (let i = 0; i < 34; i++) {
-      const r = s * (0.08 + Math.random() * 0.26);
-      const g = ctx.createRadialGradient(
-        Math.random() * s, Math.random() * s, 0,
-        Math.random() * s, Math.random() * s, r);
-      g.addColorStop(0, shadeHex(Math.random() < 0.5 ? baseHex : veinHex, 0.86 + Math.random() * 0.3));
+    // 1. manchas de tom. AJUSTADO depois de renderizar: com raio de até
+    // 0,26 do ladrilho e alfa 0,16, num ladrilho de 1,6 m elas viravam
+    // borrões de 40 cm — leitura de camuflagem, não de pedra. Manchas
+    // pequenas e fracas dão variação sem virar desenho.
+    for (let i = 0; i < 52; i++) {
+      const cx = Math.random() * s, cy = Math.random() * s;
+      const r = s * (0.03 + Math.random() * 0.09);
+      const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
+      g.addColorStop(0, shadeHex(Math.random() < 0.5 ? baseHex : veinHex, 0.9 + Math.random() * 0.22));
       g.addColorStop(1, 'rgba(0,0,0,0)');
-      ctx.globalAlpha = 0.16;
+      ctx.globalAlpha = 0.07;
       ctx.fillStyle = g;
-      ctx.fillRect(0, 0, s, s);
+      ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
     }
     ctx.globalAlpha = 1;
 
@@ -2310,6 +2332,38 @@ function buildInstanced(geo, mat, transforms, castShadow) {
   im.castShadow = !!castShadow;
   im.receiveShadow = true;
   return im;
+}
+
+// ------------------------------------------------------------
+// INSTANCING SETORIZADO
+// Um InstancedMesh tem UMA esfera envolvente, que cobre todas as
+// instâncias. O anel de mata distante é um círculo de 130 m de raio em
+// volta da casa: a esfera dele contém a câmera SEMPRE, então o frustum
+// culling nunca descarta nada e os ~1.000 cartões do anel inteiro são
+// rasterizados a cada frame — inclusive os que estão atrás da câmera.
+// Em cartão com alphaTest isso é custo de preenchimento puro, que é
+// justamente o gargalo em GPU de celular.
+//
+// Dividindo o anel em setores angulares, cada setor vira um mesh com
+// esfera pequena, e o frustum descarta os que estão fora de vista. Sai
+// de 1 chamada sempre desenhando tudo para ~4 chamadas desenhando
+// tipicamente 1 ou 2.
+// ------------------------------------------------------------
+function buildInstancedSectors(geo, mat, transforms, castShadow, sectors) {
+  const n = sectors || 6;
+  const out = [];
+  const baldes = [];
+  for (let i = 0; i < n; i++) baldes.push([]);
+  for (const t of transforms) {
+    let a = Math.atan2(t.z, t.x);
+    if (a < 0) a += Math.PI * 2;
+    baldes[Math.min(n - 1, Math.floor((a / (Math.PI * 2)) * n))].push(t);
+  }
+  for (const b of baldes) {
+    const im = buildInstanced(geo, mat, b, castShadow);
+    if (im) out.push(im);
+  }
+  return out;
 }
 
 // ============================================================
@@ -4270,8 +4324,8 @@ function buildDistantLandscape() {
       });
     }
   }
-  const hillMesh = buildInstanced(hillGeo, hillMat, hills, false);
-  if (hillMesh) { hillMesh.receiveShadow = false; g.add(hillMesh); }
+  buildInstancedSectors(hillGeo, hillMat, hills, false, 6)
+    .forEach(m => { m.receiveShadow = false; g.add(m); });
 
   // ------------------------------------------------------------
   // MASSA ARBÓREA DISTANTE
@@ -4306,8 +4360,8 @@ function buildDistantLandscape() {
       }
     }
   }
-  const farMesh = buildInstanced(unitCard, farMat, far, false);
-  if (farMesh) g.add(farMesh);
+  // 8 setores: o anel de mata é o maior custo de preenchimento da cena
+  buildInstancedSectors(unitCard, farMat, far, false, 8).forEach(m => g.add(m));
 
   scene.add(g);
   return g;
@@ -4499,7 +4553,11 @@ function mergeStaticByMaterial(root, label) {
 
     // castShadow entra na chave: fundir um caixote que projeta sombra com
     // um que não projeta obrigaria a escolher um dos dois comportamentos
-    const key = mat.uuid + '|' + (o.castShadow ? 1 : 0) + '|' + (o.receiveShadow ? 1 : 0);
+    // A indexação entra na chave porque mergeGeometries() recusa um lote
+    // que misture geometria indexada e não indexada — e nesse caso o
+    // lote INTEIRO deixaria de ser fundido. Separando, os dois fundem.
+    const key = mat.uuid + '|' + (o.castShadow ? 1 : 0) + '|' + (o.receiveShadow ? 1 : 0)
+              + '|' + (o.geometry.index ? 'i' : 'n');
     let b = buckets.get(key);
     if (!b) { b = { mat, geos: [], srcs: [], cast: o.castShadow, receive: o.receiveShadow }; buckets.set(key, b); }
 
