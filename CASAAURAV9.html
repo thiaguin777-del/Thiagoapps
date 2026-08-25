@@ -1040,14 +1040,32 @@ function setupLighting() {
   // archviz para vãos envidraçados. Não projeta sombra e não conta no
   // orçamento de PointLight, mas é cara: só 2, nas duas fachadas de vidro.
   RectAreaLightUniformsLib.init();
+  // ------------------------------------------------------------
+  // BUG CORRIGIDO — a luz de janela iluminava PARA FORA
+  // MEDIDO com .devtest/tune.mjs, variando a intensidade destas luzes de
+  // 3,4 até 400: a panorâmica EXTERNA subia de 119,9 para 140,7 de
+  // luminância e o enquadramento INTERNO não mexia um décimo (129,3 ->
+  // 129,2). Ou seja: elas emitiam, mas para o lado errado.
+  //
+  // Causa: RectAreaLight emite ao longo do -Z LOCAL (é o que lookAt()
+  // orienta). Sem rotação o -Z local já apontava para dentro da casa; o
+  // rotation.y = PI virava a emissão para +Z, para o jardim. A técnica
+  // descrita logo acima — luz de plano para vão envidraçado, o padrão de
+  // archviz — nunca chegou a acontecer no interior. Era essa a razão de
+  // fundo de os ambientes lerem frios: a única luz que chegava neles era
+  // o IBL azul do céu.
+  //
+  // Agora usa lookAt() para dentro: explícito, sem depender de lembrar a
+  // convenção de eixo.
+  // ------------------------------------------------------------
   const windowLights = [
-    { w: 13.0, h: 2.8, pos: [-4.15, 1.7, 5.6], rot: [0, Math.PI, 0] },  // fachada sul social
-    { w: 7.4,  h: 2.8, pos: [8.0, 1.7, 5.6],  rot: [0, Math.PI, 0] },   // fachada sul suíte
+    { w: 13.0, h: 2.8, pos: [-4.15, 1.7, 5.6], alvo: [-4.15, 1.4, -2.0] },  // fachada sul social
+    { w: 7.4,  h: 2.8, pos: [8.0, 1.7, 5.6],  alvo: [8.0, 1.4, -2.0] },     // fachada sul suíte
   ];
   windowLights.forEach(wl => {
     const rl = new THREE.RectAreaLight(0xf2ede2, 0, wl.w, wl.h);
     rl.position.set(wl.pos[0], wl.pos[1], wl.pos[2]);
-    rl.rotation.set(wl.rot[0], wl.rot[1], wl.rot[2]);
+    rl.lookAt(wl.alvo[0], wl.alvo[1], wl.alvo[2]);
     scene.add(rl);
     rectLights.push(rl);
   });
