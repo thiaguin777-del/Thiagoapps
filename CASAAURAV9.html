@@ -521,6 +521,67 @@ const DEBUG = location.search.includes('debug=1');
 // ============================================================
 const ASSET_BASE = (new URLSearchParams(location.search).get('assets') || './assets/').replace(/\/?$/, '/');
 
+// ============================================================
+// TELEMETRIA — inerte ate ser configurada
+// ------------------------------------------------------------
+// O produto promete 60fps "em qualquer hardware". Sem medir no parque
+// real, isso e uma esperanca: o iPad do corretor e o Galaxy do cliente
+// nao estao aqui, e nenhum benchmark local substitui os dois.
+//
+// Manda UM pacote por sessao, ao sair, com o que decide a promessa: fps
+// medio, o percentil baixo (que dói mais que a media), tempo ate a cena
+// aparecer, tier escolhido e o contexto do aparelho.
+//
+// Sem SUPABASE_URL preenchido nao faz nada — nenhuma requisicao, nenhum
+// erro no console. E o padrao: quem clonar o repo nao dispara telemetria
+// para lugar nenhum sem saber.
+// ============================================================
+const TELEMETRIA = {
+  url: '',            // https://<ref>.supabase.co
+  chave: '',          // publishable key (anon). NAO a service key.
+  slug: 'casa-aura',
+  enviado: false,
+};
+
+function enviarTelemetria() {
+  if (!TELEMETRIA.url || !TELEMETRIA.chave || TELEMETRIA.enviado) return;
+  if (Perf.quadros < 120) return;   // sessao curta demais para significar algo
+  TELEMETRIA.enviado = true;
+  let mem = null, nucleos = null;
+  try { mem = navigator.deviceMemory || null; nucleos = navigator.hardwareConcurrency || null; } catch (e) {}
+  const corpo = JSON.stringify([{
+    sessao: (crypto.randomUUID ? crypto.randomUUID() : String(Date.now())),
+    slug: TELEMETRIA.slug,
+    tier: Quality.level,
+    fps_medio: Perf.frameMs ? +(1000 / Perf.frameMs).toFixed(1) : null,
+    fps_p05: Perf.piorFps || null,
+    quadro_ms: Perf.frameMs ? +Perf.frameMs.toFixed(2) : null,
+    draw_calls: renderer ? renderer.info.render.calls : null,
+    programas: renderer ? renderer.info.programs.length : null,
+    ms_ate_pronto: Perf.bootMs ? Math.round(Perf.bootMs) : null,
+    ua: navigator.userAgent.slice(0, 300),
+    memoria_gb: mem, nucleos: nucleos,
+    dpr: window.devicePixelRatio,
+    tela: window.innerWidth + 'x' + window.innerHeight,
+    webgl2: !!(renderer && renderer.capabilities && renderer.capabilities.isWebGL2),
+    max_textura: renderer && renderer.capabilities ? renderer.capabilities.maxTextureSize : null,
+  }]);
+  // sendBeacon sobrevive ao fechamento da aba, que e exatamente quando
+  // este pacote precisa sair. fetch normal seria cancelado.
+  try {
+    const u = TELEMETRIA.url.replace(/\/?$/, '') + '/rest/v1/analytics';
+    if (navigator.sendBeacon) {
+      navigator.sendBeacon(u + '?apikey=' + encodeURIComponent(TELEMETRIA.chave),
+        new Blob([corpo], { type: 'application/json' }));
+    } else {
+      fetch(u, { method: 'POST', keepalive: true, body: corpo,
+        headers: { 'Content-Type': 'application/json', apikey: TELEMETRIA.chave } });
+    }
+  } catch (e) { /* telemetria nunca pode derrubar a experiencia */ }
+}
+window.addEventListener('pagehide', enviarTelemetria);
+
+
 const ASSET_MANIFEST = {
   // --- Texturas PBR (substituem as texturas de canvas) ---
   textures: {
@@ -1294,10 +1355,10 @@ function setupLighting() {
 // do dia. Sem isso o céu noturno continuava iluminando a casa como se
 // fosse meio-dia, porque envMapIntensity é constante por material.
 const LP = {
-  day:    { bg: 0x87CEEB, fog: 0xdbe7ef, fogD: 0.00330, sunC: 0xfff5e6, sunI: 5.00, hemiSky: 0xcfe2f2, hemiGnd: 0xa8906c, hemiI: 0.30, amb: 0.05, exp: 1.10, envI: 1.05, indoorFill: 0.15, pool: 0.0,  lamp: 0.0,  glassGlow: 0.00, waterGlow: 0.00 },
-  golden: { bg: 0xE8A971, fog: 0xf0cfa8, fogD: 0.00400, sunC: 0xffb066, sunI: 3.20, hemiSky: 0xffcc88, hemiGnd: 0x9c7550, hemiI: 0.28, amb: 0.05, exp: 1.08, envI: 0.82, indoorFill: 0.30, pool: 1.15,  lamp: 0.6,  glassGlow: 0.06, waterGlow: 0.05 },
-  blue:   { bg: 0x2a4a78, fog: 0x35527c, fogD: 0.00300, sunC: 0x7fa0d8, sunI: 0.45, hemiSky: 0x4a72b0, hemiGnd: 0x3a3830, hemiI: 0.36, amb: 0.11, exp: 1.23, envI: 0.80, indoorFill: 1.20, pool: 1.6,  lamp: 1.0,  glassGlow: 0.09, waterGlow: 0.15 },
-  night:  { bg: 0x2b3d63, fog: 0x1b2740, fogD: 0.00340, sunC: 0x33446a, sunI: 0.09, hemiSky: 0x44578a, hemiGnd: 0x1a1712, hemiI: 0.85, amb: 0.18, exp: 1.32, envI: 0.91, indoorFill: 2.40, pool: 1.7,  lamp: 1.6,  glassGlow: 0.10, waterGlow: 0.22 },
+  day:    { bg: 0x87CEEB, fog: 0xdbe7ef, fogD: 0.00330, sunC: 0xfff5e6, sunI: 5.00, hemiSky: 0xcfe2f2, hemiGnd: 0xa8906c, hemiI: 0.30, amb: 0.05, exp: 0.95, envI: 1.05, indoorFill: 0.15, pool: 0.0,  lamp: 0.0,  glassGlow: 0.00, waterGlow: 0.00 },
+  golden: { bg: 0xE8A971, fog: 0xf0cfa8, fogD: 0.00400, sunC: 0xffb066, sunI: 3.20, hemiSky: 0xffcc88, hemiGnd: 0x9c7550, hemiI: 0.28, amb: 0.05, exp: 0.95, envI: 0.82, indoorFill: 0.30, pool: 1.15,  lamp: 0.6,  glassGlow: 0.06, waterGlow: 0.05 },
+  blue:   { bg: 0x2a4a78, fog: 0x35527c, fogD: 0.00300, sunC: 0x7fa0d8, sunI: 0.45, hemiSky: 0x4a72b0, hemiGnd: 0x3a3830, hemiI: 0.36, amb: 0.11, exp: 1.10, envI: 0.80, indoorFill: 1.20, pool: 1.6,  lamp: 1.0,  glassGlow: 0.09, waterGlow: 0.15 },
+  night:  { bg: 0x2b3d63, fog: 0x1b2740, fogD: 0.00340, sunC: 0x33446a, sunI: 0.09, hemiSky: 0x44578a, hemiGnd: 0x1a1712, hemiI: 0.85, amb: 0.18, exp: 1.18, envI: 0.91, indoorFill: 2.40, pool: 1.7,  lamp: 1.6,  glassGlow: 0.10, waterGlow: 0.22 },
 };
 
 // ============================================================
@@ -1712,7 +1773,7 @@ const VignetteShader = {
 // grade — que agora opera em 0..1, como um grade deve operar.
 // ============================================================
 const ColorGradeShader = {
-  uniforms: { tDiffuse: { value: null }, saturation: { value: 1.08 }, contrast: { value: 1.05 },
+  uniforms: { tDiffuse: { value: null }, saturation: { value: 1.08 }, contrast: { value: 1.12 },
               warmth: { value: 0.3 }, lift: { value: 0.012 }, exposure: { value: 1.0 } },
   vertexShader: VignetteShader.vertexShader,
   fragmentShader: [
@@ -3567,6 +3628,7 @@ const Perf = {
   frameMs: 0,           // media movel do tempo de quadro
   gpuMs: null,          // preenchido se a extensao de timer existir
   quadros: 0,
+  piorFps: null,   // o percentil baixo dói mais que a média
   porTextura: [],   // [rotulo, ms] de cada geracao
 };
 const _geoCache = new Map();
@@ -6185,6 +6247,7 @@ function buildGround() {
 // um grupo de objetos de verdade sendo criado.
 // ============================================================
 async function buildScene(onProgress) {
+  const _tBoot = performance.now();
   const steps = [
     ['Materiais', () => {
       buildMaterials();
@@ -6311,6 +6374,13 @@ async function buildScene(onProgress) {
   targetLookAt.copy(controls.target);
 
   setLightMode('day', 0.01);
+  Perf.bootMs = performance.now() - _tBoot;
+  if (DEBUG) {
+    console.info('[perf] boot ' + Perf.bootMs.toFixed(0) + ' ms | textura procedural '
+      + Perf.texturasMs.toFixed(0) + ' ms em ' + Perf.texturasN + ' geracoes');
+    console.info('[perf] etapas mais caras: ' + Perf.steps.slice().sort((a, b) => b[1] - a[1])
+      .slice(0, 4).map(e => e[0] + ' ' + e[1] + 'ms').join(' | '));
+  }
 }
 
 // MEDIDO: 348 meshes projetando sombra. O shadow map é re-renderizado
@@ -7279,6 +7349,9 @@ function animate() {
   if (now - lastFrameTime >= 1000) {
     currentFPS = Math.round((frameCount * 1000) / (now - lastFrameTime));
     frameCount = 0; lastFrameTime = now;
+    if (Perf.quadros > 120) {
+      Perf.piorFps = (Perf.piorFps === null) ? currentFPS : Math.min(Perf.piorFps, currentFPS);
+    }
     if (DEBUG && Perf.quadros > 60) {
       console.info('[perf] ' + currentFPS + ' fps | quadro ' + Perf.frameMs.toFixed(1) + ' ms | '
         + renderer.info.render.calls + ' draw | ' + renderer.info.programs.length + ' programas');
