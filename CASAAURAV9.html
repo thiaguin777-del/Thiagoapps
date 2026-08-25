@@ -1760,7 +1760,8 @@ function carveCourses(h, size, opts) {
 
   for (let f = 0; f < fiadas; f++) {
     const y0 = bordas[f], y1 = bordas[f + 1];
-    const nBlocos = 2 + Math.floor(rnd() * 3);
+    // 1 a 2 peças por fiada: painel de grande formato, não bloco
+    const nBlocos = 1 + Math.floor(rnd() * 2);
     const off = rnd();
     // limites verticais dos blocos desta fiada
     const cortes = [];
@@ -1879,6 +1880,12 @@ function pbrFromHeight(size, h, cor, opts) {
 // normalScale e mantendo `roughness` em 1 (quem manda passa a ser o mapa,
 // que já traz o valor absoluto — multiplicar de novo achataria tudo).
 function applyPBR(material, maps, normalScale) {
+  // Os materiais são construídos com texturas procedurais que aqui são
+  // SUBSTITUÍDAS. Sem descartar as antigas elas ficam alocadas na GPU
+  // sem nenhuma referência que as use — vazamento silencioso, e ainda
+  // aparecendo na contagem de renderer.info.memory.textures.
+  [material.map, material.normalMap, material.roughnessMap, material.aoMap]
+    .forEach(t => { if (t && t.dispose && !Object.values(maps).includes(t)) t.dispose(); });
   material.map = maps.map;
   material.normalMap = maps.normalMap;
   material.normalScale = new THREE.Vector2(normalScale, normalScale);
@@ -2810,7 +2817,7 @@ function buildMaterials() {
   {
     const h = heightField(pbrSize, { octaves: 4, baseFreq: 6, persistence: 0.5, seed: 53 });
     for (let i = 0; i < h.length; i++) h[i] = 0.45 + h[i] * 0.55;   // face do bloco
-    const tomBloco = carveCourses(h, pbrSize, { courses: 6, depth: 0.5, jointWidth: 0.008, seed: 11 });
+    const tomBloco = carveCourses(h, pbrSize, { courses: 3, depth: 0.5, jointWidth: 0.005, seed: 11 });
     const maps = pbrFromHeight(pbrSize, h, (alt, cav, x, y, size) => {
       // dois níveis de variação: o tom da PEÇA e o grão DENTRO da peça
       const peca = tomBloco[y * size + x];
