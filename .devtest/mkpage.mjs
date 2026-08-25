@@ -71,6 +71,7 @@ window.__AURA = {
     if (o.amb !== undefined) LP.day.amb = o.amb;
     if (o.envI !== undefined) LP.day.envI = o.envI;
     if (o.exp !== undefined) LP.day.exp = o.exp;
+    if (o.rect !== undefined) window.__RECT_K = o.rect;
     lastEnvT = -99;
     applySolarTime(0);
   },

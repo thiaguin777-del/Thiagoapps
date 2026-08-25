@@ -40,6 +40,12 @@ const out = await page.evaluate(() => {
     meshesSimples: meshes, instancedMeshes: instanced, instancias: insts,
     meshesFundidos: merged, trianglesCena: Math.round(tris),
     render: A.stats(),
+    rect: (() => {
+      const A2 = window.__AURA;
+      const out = [];
+      A2.scene.traverse(o => { if (o.isRectAreaLight) out.push({ i: o.intensity, w: o.width, h: o.height, pos: [o.position.x, o.position.y, o.position.z] }); });
+      return out;
+    })(),
     selftest: A.selftest(),
   };
 });

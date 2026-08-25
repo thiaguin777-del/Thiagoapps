@@ -713,6 +713,13 @@ function createAssetSystem() {
 // sutilmente, a base fica firme. Custo zero de CPU e nenhum draw call
 // extra. Amplitude baixa de propósito — brisa, não tempestade.
 // ============================================================
+// Intensidade da luz de janela. Calibrada por medição no enquadramento
+// interno (ver .devtest/tune.mjs): o interior recebia quase só o IBL do
+// céu, e por isso lia frio e apagado apesar de o forro de madeira estar
+// quente. A luz de janela representa o céu MAIS o rebote do piso claro
+// externo, que é o que de fato aquece uma sala com fachada de vidro.
+const RECT_K = 3.4;
+
 const windUniform = { value: 0 };
 function applyWind(material, amplitude) {
   material.onBeforeCompile = (shader) => {
@@ -1271,7 +1278,7 @@ function applySolarTime(t) {
   // cômodo conforme o sol cai — como uma casa real sendo ocupada.
   // luz de janela cai junto com o sol e esfria ao entardecer
   for (let i = 0; i < rectLights.length; i++) {
-    rectLights[i].intensity = Math.max(0, (1.0 - solarTime * 1.25)) * 3.4;
+    rectLights[i].intensity = Math.max(0, (1.0 - solarTime * 1.25)) * (window.__RECT_K || RECT_K);
     rectLights[i].color.setHex(solarTime < 0.5 ? 0xf2ede2 : 0xf5d9b4);
   }
 
@@ -3162,19 +3169,83 @@ function createOutdoorLounger() {
   if (Assets) { const _m = Assets.model('lounger'); if (_m) {
     const _g = new THREE.Group(); _m.scale.setScalar(1); _g.add(_m);
     addContactShadow(_g, 1.6, 1.6, 0.38); return _g; } }
+
+  // ------------------------------------------------------------
+  // ESPREGUIÇADEIRA — perfil extrudado, não caixas empilhadas
+  // A versão anterior era uma laje plana + um encosto inclinado solto +
+  // 4 pés. Espreguiçadeira de verdade tem um colchão CONTÍNUO que sobe
+  // do assento para o encosto passando por uma quebra no joelho — é
+  // esse perfil que o olho reconhece, e ele não sai de caixas soltas.
+  //
+  // ExtrudeGeometry com bevel resolve exatamente isso: desenha-se o
+  // perfil de lado e ele é varrido pela largura, já com aresta
+  // arredondada. Mesma técnica que a modelagem em SketchUp usaria, sem
+  // trazer malha externa e mantendo os materiais do projeto.
+  // ------------------------------------------------------------
   const g = new THREE.Group();
-  addContactShadow(g, 0.95, 2.2, 0.34);
-  const base = rbox(0.65, 0.12, 1.9, M.tecidoEscuro);
-  base.position.y = 0.32; g.add(base);
-  const backRest = rbox(0.65, 0.08, 0.7, M.tecidoEscuro);
-  backRest.position.set(0, 0.5, -0.75);
-  backRest.rotation.x = 0.5;
-  g.add(backRest);
+  addContactShadow(g, 0.95, 2.3, 0.34);
+
+  const W = 0.68;          // largura
+  const perfil = new THREE.Shape();
+  // (z = comprimento, y = altura), do pé para a cabeceira
+  perfil.moveTo(-0.98, 0.30);
+  perfil.lineTo(0.12, 0.30);
+  perfil.quadraticCurveTo(0.30, 0.32, 0.42, 0.44);   // quebra do joelho
+  perfil.lineTo(0.94, 0.86);                          // encosto reclinado
+  perfil.quadraticCurveTo(1.02, 0.92, 0.98, 0.99);
+  perfil.lineTo(0.90, 1.03);
+  perfil.quadraticCurveTo(0.84, 1.05, 0.80, 1.01);
+  perfil.lineTo(0.32, 0.56);
+  perfil.quadraticCurveTo(0.22, 0.47, 0.10, 0.46);
+  perfil.lineTo(-0.98, 0.46);
+  perfil.quadraticCurveTo(-1.05, 0.46, -1.05, 0.38);
+  perfil.quadraticCurveTo(-1.05, 0.30, -0.98, 0.30);
+
+  const colchao = new THREE.Mesh(
+    new THREE.ExtrudeGeometry(perfil, {
+      depth: W, bevelEnabled: true,
+      bevelThickness: 0.02, bevelSize: 0.02, bevelSegments: 2,
+      curveSegments: 5,
+    }),
+    M.tecidoSofa
+  );
+  // ExtrudeGeometry varre em +Z; o perfil foi desenhado em (z, y), então
+  // rotaciona para a varredura virar a LARGURA da peça.
+  colchao.rotation.y = Math.PI / 2;
+  colchao.position.set(-W / 2, 0, 0);
+  colchao.castShadow = true; colchao.receiveShadow = true;
+  g.add(colchao);
+
+  // Costura longitudinal: divide o colchão em duas almofadas, que é como
+  // estofado de área externa realmente é feito.
+  const costura = rbox(0.012, 0.02, 1.9, M.tecidoEscuro);
+  costura.position.set(0, 0.47, -0.1);
+  g.add(costura);
+
+  // Estrutura em ipê aparecendo por baixo do colchão
+  for (const sx of [-0.30, 0.30]) {
+    const rail = rbox(0.05, 0.09, 2.0, M.ipe);
+    rail.position.set(sx, 0.26, -0.02);
+    g.add(rail);
+  }
+  const travessa = rbox(0.62, 0.05, 0.05, M.ipe);
+  travessa.position.set(0, 0.26, 0.86);
+  g.add(travessa);
+
+  // Pés: dois na frente, e atrás uma roda — detalhe que denuncia móvel
+  // de piscina de verdade.
   for (const sx of [-0.28, 0.28]) {
-    for (const sz of [-0.85, 0.85]) {
-      const leg = rbox(0.04, 0.28, 0.04, M.metal);
-      leg.position.set(sx, 0.14, sz); g.add(leg);
-    }
+    const leg = rbox(0.04, 0.22, 0.04, M.metal);
+    leg.position.set(sx, 0.11, -0.82);
+    g.add(leg);
+    const legB = rbox(0.04, 0.20, 0.04, M.metal);
+    legB.position.set(sx, 0.12, 0.30);
+    g.add(legB);
+    const roda = new THREE.Mesh(sharedCyl(0.07, 0.07, 0.03, 14), M.metal);
+    roda.rotation.z = Math.PI / 2;
+    roda.position.set(sx, 0.07, 0.86);
+    roda.castShadow = true;
+    g.add(roda);
   }
   return g;
 }
