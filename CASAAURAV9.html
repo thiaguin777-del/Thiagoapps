@@ -1358,6 +1358,8 @@ function applySolarTime(t) {
   // ela vira o elemento luminoso da composição noturna, que é
   // exatamente o que uma piscina de alto padrão faz ao vivo.
   if (M && M.revestPiscina) M.revestPiscina.emissiveIntensity = 0.35 + s.lamp * 1.15;
+  // Balizadores de fachada acendem junto com o resto da casa.
+  uplightUniform.value = s.lamp * 0.42;
   renderer.toneMappingExposure = s.exp;
   poolLight.intensity = s.pool;
   // WOW #3 — Acendimento escalonado ao anoitecer.
@@ -2070,6 +2072,70 @@ function noiseNormalTexture(scale, strength) {
 // porque a variação macro não coincide com o período do ladrilho.
 // Custo: algumas instruções por fragmento, sem textura extra.
 // ============================================================
+// ============================================================
+// LUZ DE FACHADA (uplight) — sem custo de luz real
+// ------------------------------------------------------------
+// ENCONTRADO renderizando a "Visão Final": à noite a arquitetura só se
+// lia como silhueta. Faltava o que toda casa de alto padrão tem à
+// noite — balizadores lavando as paredes de baixo para cima. É isso que
+// dá relevo à fachada depois que o sol some.
+//
+// O caminho óbvio seria PointLight ou SpotLight, mas não cabe: o
+// MeshStandardMaterial avalia TODAS as luzes por fragmento, e o
+// orçamento é de 4 a 6 luzes reais no projeto inteiro (LIGHT_BUDGET).
+// Gastar metade dele em fachada seria trocar a luz dos ambientes por
+// luz de parede.
+//
+// Aqui a lavagem é calculada direto no material: para cada ponto de
+// luminária, um decaimento radial em XZ e um decaimento vertical a
+// partir da base. Custa algumas instruções por fragmento em DOIS
+// materiais, não uma luz na cena inteira, e não entra no orçamento.
+// A intensidade acompanha a mesma rampa das luminárias internas.
+// ============================================================
+const uplightUniform = { value: 0 };
+
+function applyUplightWash(material, spots, alcance, altura, prevHook) {
+  if (!spots || !spots.length) return;
+  const n = spots.length;
+  const pontos = spots.map(p => new THREE.Vector3(p[0], p[1], p[2]));
+  const prev = prevHook || material.onBeforeCompile;
+  material.onBeforeCompile = (shader) => {
+    if (prev) prev(shader);
+    shader.uniforms.uWash = uplightUniform;
+    shader.uniforms.uWashSpots = { value: pontos };
+    shader.uniforms.uWashR = { value: alcance };
+    shader.uniforms.uWashH = { value: altura };
+    shader.vertexShader = 'varying vec3 vWashWPos;\n' + shader.vertexShader.replace(
+      '#include <begin_vertex>',
+      '#include <begin_vertex>\n  vWashWPos = (modelMatrix * vec4(transformed, 1.0)).xyz;');
+    shader.fragmentShader = [
+      'uniform float uWash;',
+      'uniform float uWashR;',
+      'uniform float uWashH;',
+      'uniform vec3 uWashSpots[' + n + '];',
+      'varying vec3 vWashWPos;',
+    ].join('\n') + '\n' + shader.fragmentShader.replace(
+      '#include <emissivemap_fragment>',
+      [
+        '#include <emissivemap_fragment>',
+        'if (uWash > 0.001) {',
+        '  float w = 0.0;',
+        '  for (int i = 0; i < ' + n + '; i++) {',
+        '    vec3 sp = uWashSpots[i];',
+        '    float d = distance(vWashWPos.xz, sp.xz);',
+        '    float radial = 1.0 - smoothstep(0.0, uWashR, d);',
+        // decaimento vertical ao quadrado: forte no rodapé, some na verga
+        '    float h = clamp((vWashWPos.y - sp.y) / uWashH, 0.0, 1.0);',
+        '    float vert = (1.0 - h) * (1.0 - h);',
+        '    w += radial * vert;',
+        '  }',
+        '  totalEmissiveRadiance += vec3(1.0, 0.82, 0.60) * min(w, 1.5) * uWash;',
+        '}',
+      ].join('\n'));
+  };
+  material.needsUpdate = true;
+}
+
 function applyMacroVariation(material, scale, strength, prevHook) {
   const prev = prevHook || material.onBeforeCompile;
   material.onBeforeCompile = (shader) => {
@@ -2385,6 +2451,23 @@ function buildMaterials() {
   // espaco de mundo, incomensuravel com o periodo do ladrilho.
   applyMacroVariation(M.stoneCore, 4.5, 0.13);
   applyMacroVariation(M.estuque, 6.0, 0.055);
+
+  // Balizadores de fachada. Posições escolhidas onde existe PAREDE OPACA
+  // para lavar: a fachada norte, as duas empenas laterais e o núcleo de
+  // pedra. Na fachada sul não faz sentido — ali é vidro, e quem ilumina
+  // é a luz que vaza de dentro.
+  const balizadores = [
+    [-9.0, 0.05, -6.45], [-3.0, 0.05, -6.45], [3.0, 0.05, -6.45], [9.0, 0.05, -6.45],
+    [-13.35, 0.05, -2.0], [-13.35, 0.05, 2.5],
+    [12.35, 0.05, -2.0], [12.35, 0.05, 2.5],
+  ];
+  // Em aparelho fraco, metade dos pontos: o laço é desenrolado no shader,
+  // então o número de pontos é literalmente o número de iterações.
+  const balizadoresTier = (Quality.level === 'low' || Quality.level === 'medium')
+    ? balizadores.filter((_, i) => i % 2 === 0)
+    : balizadores;
+  applyUplightWash(M.estuque, balizadoresTier, 2.8, 3.0);
+  applyUplightWash(M.stoneCore, [[3.4, 0.05, -4.2], [3.4, 0.05, 3.6]], 2.4, 4.2);
   applyMacroVariation(M.travertino, 5.0, 0.06);
 
   // Sem anisotropia, uma textura repetida 450x vira ruído cintilante em
