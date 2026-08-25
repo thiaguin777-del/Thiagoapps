@@ -5,7 +5,7 @@ import { chromium } from '/opt/node22/lib/node_modules/playwright/index.mjs';
 import { mkdirSync, writeFileSync } from 'node:fs';
 
 const OUT = process.argv[2] || 'shots';
-const ONLY = process.argv[3] ? process.argv[3].split(',') : null;
+const ONLY = (process.argv[3] || process.env.AURA_ONLY) ? (process.argv[3] || process.env.AURA_ONLY).split(',') : null;
 mkdirSync(OUT, { recursive: true });
 
 // Enquadramentos escolhidos para expor os problemas que importam:
@@ -32,7 +32,7 @@ const logs = [];
 page.on('console', m => logs.push(`[${m.type()}] ${m.text()}`));
 page.on('pageerror', e => logs.push(`[pageerror] ${e.message}\n${e.stack || ''}`));
 
-await page.goto('http://127.0.0.1:8099/index.html?debug=1', { waitUntil: 'load', timeout: 120000 });
+await page.goto('http://127.0.0.1:8099/index.html?debug=1&q=' + (process.env.AURA_Q || 'high') + '', { waitUntil: 'load', timeout: 120000 });
 
 // Espera o build terminar de verdade (não um sleep arbitrário).
 await page.waitForFunction(() => window.__AURA && window.__AURA.ready, null, { timeout: 180000 })

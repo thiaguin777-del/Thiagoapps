@@ -339,9 +339,11 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 import { KTX2Loader } from 'three/addons/loaders/KTX2Loader.js';
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
+import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { GTAOPass } from 'three/addons/postprocessing/GTAOPass.js';
 import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 
 window.__casaAuraModuleStarted = true;
@@ -396,7 +398,16 @@ const QUALITY_PRESETS = {
 
 const Quality = {
   level: 'high',
+  // ?q=ultra|high|medium|low trava o tier e desliga o rebaixamento
+  // automático. Existe por uma razão prática de engenharia: sem isso não
+  // há como auditar visualmente um tier específico — o renderizador de
+  // teste é lento, o rebaixamento dispara, e o que se audita acaba sendo
+  // sempre 'low'. Também serve ao corretor que quer forçar 'ultra' num
+  // notebook bom para apresentar ao cliente.
+  locked: false,
   init() {
+    const forced = (location.search.match(/[?&]q=(ultra|high|medium|low)/) || [])[1];
+    if (forced) { this.level = forced; this.locked = true; return this.level; }
     if (Capability.isMobile && (Capability.mem <= 4 || Capability.cores <= 4)) this.level = 'medium';
     if (Capability.isMobile && Capability.mem <= 2) this.level = 'low';
     if (!Capability.isMobile && Capability.mem >= 8 && Capability.cores >= 8) this.level = 'ultra';
@@ -404,6 +415,7 @@ const Quality = {
   },
   get() { return QUALITY_PRESETS[this.level]; },
   downgrade() {
+    if (this.locked) return false;
     const order = ['ultra', 'high', 'medium', 'low'];
     const i = order.indexOf(this.level);
     if (i < order.length - 1) { this.level = order[i + 1]; return true; }
@@ -452,7 +464,7 @@ let Assets = null;
 let audioSys = null;
 let sky = null, skyPMREM = null, envDirty = false, lastEnvT = -99;
 let waterObj = null;
-let composer = null, gradePass = null, grainPass = null, bloomPass = null, composerFailed = false;
+let composer = null, gradePass = null, grainPass = null, bloomPass = null, gtaoPass = null, composerFailed = false;
 let currentChapter = 0;
 let targetCamPos = new THREE.Vector3(), targetLookAt = new THREE.Vector3();
 let currentLightMode = 'day';
@@ -1011,11 +1023,29 @@ function setupLighting() {
   lightBudgetLeft = LIGHT_BUDGET[Quality.level] || 8;
 }
 
+// CORRIGIDO — sobre-exposição por contagem tripla da luz do céu.
+// MEDIDO no render: a fachada NORTE, que está em sombra própria ao
+// meio-dia, saía em branco puro (255). Isso é impossível fisicamente e
+// era o que dava o aspecto "estourado" das capturas.
+//
+// Causa: a luz do céu estava sendo somada TRÊS vezes — o environment
+// PMREM gerado do próprio céu (IBL), mais a HemisphereLight, mais a
+// AmbientLight. Cada uma sozinha é defensável; as três juntas dobram o
+// preenchimento e apagam toda a modelagem de volume.
+//
+// Correção: o IBL do céu passa a ser a fonte principal de preenchimento
+// (é o que tem direção e oclusão de verdade), a hemisférica vira um
+// resto para o rebote do solo, e a ambiente cai para quase nada — só o
+// suficiente para nenhum canto fechar em preto absoluto.
+//
+// envI é novo: escala o envMapIntensity de TODOS os materiais ao longo
+// do dia. Sem isso o céu noturno continuava iluminando a casa como se
+// fosse meio-dia, porque envMapIntensity é constante por material.
 const LP = {
-  day:    { bg: 0x87CEEB, fog: 0x9fd4ea, fogD: 0.01155, sunC: 0xfff5e6, sunI: 1.9, hemiSky: 0xddeeff, hemiGnd: 0x8a7f6a, hemiI: 0.70, amb: 0.38, exp: 1.00, pool: 0.0,  lamp: 0.0,  glassGlow: 0.00, waterGlow: 0.00 },
-  golden: { bg: 0xE8A971, fog: 0xefb98a, fogD: 0.01350, sunC: 0xffaa55, sunI: 1.55, hemiSky: 0xffcc88, hemiGnd: 0x7a5c40, hemiI: 0.55, amb: 0.32, exp: 0.94, pool: 0.6,  lamp: 0.6,  glassGlow: 0.06, waterGlow: 0.05 },
-  blue:   { bg: 0x24406b, fog: 0x2c4a72, fogD: 0.007, sunC: 0x7fa0d8, sunI: 0.6, hemiSky: 0x4a72b0, hemiGnd: 0x2a3040, hemiI: 0.38, amb: 0.20, exp: 0.82, pool: 1.1,  lamp: 1.0,  glassGlow: 0.20, waterGlow: 0.15 },
-  night:  { bg: 0x0a0e1a, fog: 0x0c0f1c, fogD: 0.009, sunC: 0x33446a, sunI: 0.18,hemiSky: 0x1c2436, hemiGnd: 0x0a0c12, hemiI: 0.22, amb: 0.15, exp: 0.68, pool: 1.7,  lamp: 1.6,  glassGlow: 0.32, waterGlow: 0.22 },
+  day:    { bg: 0x87CEEB, fog: 0x9fd4ea, fogD: 0.01155, sunC: 0xfff5e6, sunI: 2.9, hemiSky: 0xcfe2f2, hemiGnd: 0xa8906c, hemiI: 0.50, amb: 0.05, exp: 0.95, envI: 0.62, pool: 0.0,  lamp: 0.0,  glassGlow: 0.00, waterGlow: 0.00 },
+  golden: { bg: 0xE8A971, fog: 0xefb98a, fogD: 0.01350, sunC: 0xffb066, sunI: 2.6, hemiSky: 0xffcc88, hemiGnd: 0x9c7550, hemiI: 0.44, amb: 0.05, exp: 0.94, envI: 0.50, pool: 0.6,  lamp: 0.6,  glassGlow: 0.06, waterGlow: 0.05 },
+  blue:   { bg: 0x24406b, fog: 0x2c4a72, fogD: 0.007,   sunC: 0x7fa0d8, sunI: 0.5, hemiSky: 0x4a72b0, hemiGnd: 0x3a3830, hemiI: 0.34, amb: 0.06, exp: 0.86, envI: 0.26, pool: 1.1,  lamp: 1.0,  glassGlow: 0.20, waterGlow: 0.15 },
+  night:  { bg: 0x0a0e1a, fog: 0x0c0f1c, fogD: 0.009,   sunC: 0x33446a, sunI: 0.10, hemiSky: 0x1c2436, hemiGnd: 0x14120e, hemiI: 0.20, amb: 0.05, exp: 0.72, envI: 0.10, pool: 1.7,  lamp: 1.6,  glassGlow: 0.32, waterGlow: 0.22 },
 };
 
 // ============================================================
@@ -1116,6 +1146,7 @@ function solarStateAt(t) {
     hemiI: _lerp(A.hemiI, B.hemiI, f),
     amb: _lerp(A.amb, B.amb, f),
     exp: _lerp(A.exp, B.exp, f),
+    envI: _lerp(A.envI, B.envI, f),
     pool: _lerp(A.pool, B.pool, f),
     lamp: _lerp(A.lamp, B.lamp, f),
     glassGlow: _lerp(A.glassGlow, B.glassGlow, f),
@@ -1163,6 +1194,11 @@ function applySolarTime(t) {
   hemiLight.groundColor.copy(s.hemiGnd);
   hemiLight.intensity = s.hemiI;
   ambientLight.intensity = s.amb;
+  // Escala o IBL do céu sobre TODOS os materiais. Sem isto, o
+  // envMapIntensity é constante e o céu de meia-noite continua
+  // preenchendo a casa com a mesma força do meio-dia — a razão de a
+  // cena noturna nunca ficar realmente escura.
+  applyEnvIntensity(s.envI);
   renderer.toneMappingExposure = s.exp;
   poolLight.intensity = s.pool;
   // WOW #3 — Acendimento escalonado ao anoitecer.
@@ -1214,6 +1250,27 @@ function applySolarTime(t) {
   for (const k in SOLAR_T) { const d = Math.abs(SOLAR_T[k] - solarTime); if (d < best) { best = d; nearest = k; } }
   currentLightMode = nearest;
   document.querySelectorAll('.light-btn').forEach(b => b.classList.toggle('active', b.dataset.light === nearest && best < 0.06));
+}
+
+// Cada material guarda seu envMapIntensity autoral como base; o
+// heliodon multiplica essa base, então a relação entre materiais
+// (vidro reflete mais que estuque) é preservada em qualquer horário.
+let _envMats = null;
+function applyEnvIntensity(k) {
+  if (!M) return;
+  if (!_envMats) {
+    _envMats = [];
+    Object.keys(M).forEach((key) => {
+      const mat = M[key];
+      if (!mat || mat.envMapIntensity === undefined) return;
+      mat.userData.baseEnvI = mat.envMapIntensity;
+      _envMats.push(mat);
+    });
+  }
+  for (let i = 0; i < _envMats.length; i++) {
+    const mat = _envMats[i];
+    mat.envMapIntensity = mat.userData.baseEnvI * k;
+  }
 }
 
 function solarLabelFor(t) {
@@ -1323,6 +1380,39 @@ function setupPostProcessing() {
   if (Quality.level === 'low') return null;
   const c = new EffectComposer(renderer);
   c.addPass(new RenderPass(scene, camera));
+
+  // ------------------------------------------------------------
+  // OCLUSÃO DE AMBIENTE (GTAO)
+  // O que mais denunciava CGI depois da vegetação: nenhum canto
+  // escurecia. Encontro de parede com teto, vão embaixo do sofá, junta
+  // entre bancada e armário — tudo recebia exatamente a mesma luz de
+  // preenchimento da face aberta. Em foto de arquitetura é justamente
+  // esse escurecimento de canto que dá volume ao ambiente.
+  //
+  // O GTAO resolve em espaço de tela, sem custo de geometria. Fica fora
+  // dos tiers baixos porque exige um pré-passe de profundidade/normal.
+  // Se a classe não existir na versão do Three.js servida pelo CDN, a
+  // experiência segue sem AO em vez de quebrar.
+  // ------------------------------------------------------------
+  if ((Quality.level === 'ultra' || Quality.level === 'high') && typeof GTAOPass === 'function') {
+    try {
+      gtaoPass = new GTAOPass(scene, camera, window.innerWidth, window.innerHeight);
+      gtaoPass.output = GTAOPass.OUTPUT.Default;
+      // Raio em METROS — a cena está em escala real, então 0,45 m é
+      // aproximadamente o vão que se quer escurecer (rodapé, junta,
+      // encosto de sofá). Raio grande escureceria ambiente inteiro.
+      gtaoPass.updateGtaoMaterial({
+        radius: 0.45, distanceExponent: 1.0, thickness: 0.35,
+        scale: 1.0, samples: Quality.level === 'ultra' ? 16 : 8,
+        screenSpaceRadius: false,
+      });
+      gtaoPass.blendIntensity = 0.85;
+      c.addPass(gtaoPass);
+    } catch (e) {
+      gtaoPass = null;
+      if (DEBUG) console.warn('GTAO indisponível, seguindo sem AO:', e);
+    }
+  }
   // Bloom só no tier mais alto: é o único passe que depende de WebGL 2.
   // Vinheta, grain e color grade são shaders WebGL 1 simples e rodam em
   // qualquer lugar.
@@ -1594,6 +1684,35 @@ function leafCardTexture(baseHex, opts) {
   return tex;
 }
 
+// Cartão de touceira: as lâminas nascem da BORDA DE BAIXO e se abrem em
+// leque. Reaproveitar o cartão de copa aqui dava tufos "espalhados no
+// ar" — grama real sai do chão num ponto só.
+function grassBladeCardTexture(baseHex) {
+  const S = 256;
+  const c = document.createElement('canvas');
+  c.width = S; c.height = S;
+  const ctx = c.getContext('2d');
+  ctx.lineCap = 'round';
+  const blades = 46;
+  for (let i = 0; i < blades; i++) {
+    const x0 = S * (0.5 + (Math.random() - 0.5) * 0.42);
+    const h = S * (0.45 + Math.random() * 0.5);
+    const bend = (Math.random() - 0.5) * S * 0.42;
+    const w = S * (0.008 + Math.random() * 0.014);
+    const shade = 0.55 + Math.random() * 0.7;
+    ctx.strokeStyle = shadeHex(baseHex, shade);
+    ctx.lineWidth = w * 2;
+    ctx.beginPath();
+    ctx.moveTo(x0, S);
+    // curva com a ponta caindo: lâmina reta lê como escova
+    ctx.bezierCurveTo(x0 + bend * 0.2, S - h * 0.45, x0 + bend * 0.7, S - h * 0.85, x0 + bend, S - h);
+    ctx.stroke();
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
 // Casca com estrias verticais — o tronco de cor chapada lia como cano.
 function barkTexture(baseHex) {
   const tex = makeCanvasTexture(128, (ctx, s) => {
@@ -1829,9 +1948,20 @@ function stuccoNoiseTexture(baseHex) {
 let M = {};
 function buildMaterials() {
   M = {
-    estuque:      new THREE.MeshStandardMaterial({ map: stuccoNoiseTexture('#e9e3d8'), roughness: 0.88, metalness: 0 }),
+    // Estuque com relevo: a superfície só tinha mapa de cor, e sob luz
+    // rasante lia como papelão pintado. O normal map é o que faz a
+    // textura do reboco APARECER quando o sol raspa a fachada.
+    estuque:      new THREE.MeshStandardMaterial({
+      map: stuccoNoiseTexture('#e9e3d8'),
+      normalMap: (() => { const t = noiseNormalTexture(16, 1.1); t.repeat.set(9, 9); return t; })(),
+      normalScale: new THREE.Vector2(0.3, 0.3),
+      roughness: 0.9, metalness: 0 }),
     stoneCore:    new THREE.MeshStandardMaterial({ map: stoneVeinTexture('#8f8579', '#655c50'), roughness: 0.8, metalness: 0 }),
-    concreto:     new THREE.MeshStandardMaterial({ color: 0xc4c2be, roughness: 0.85, metalness: 0 }),
+    concreto:     new THREE.MeshStandardMaterial({
+      color: 0xc4c2be,
+      normalMap: (() => { const t = noiseNormalTexture(10, 0.8); t.repeat.set(6, 6); return t; })(),
+      normalScale: new THREE.Vector2(0.2, 0.2),
+      roughness: 0.88, metalness: 0 }),
     grafite:      new THREE.MeshStandardMaterial({ color: 0x2e2e32, roughness: 0.45, metalness: 0.15 }),
     cumaru:       new THREE.MeshStandardMaterial({
       map: woodGrainTexture('#76583e', '#3f2c1a', 2, 6, { highRes: true, planks: 6 }),
@@ -1854,9 +1984,21 @@ function buildMaterials() {
     portaEscura:  new THREE.MeshStandardMaterial({ color: 0x4a3426, roughness: 0.5, metalness: 0.02 }),
     metal:        new THREE.MeshStandardMaterial({ color: 0x1c1a18, roughness: 0.35, metalness: 0.85 }),
     latao:        new THREE.MeshStandardMaterial({ color: 0xb08d57, roughness: 0.3, metalness: 0.9 }),
-    tecidoSofa:   new THREE.MeshStandardMaterial({ color: 0xcabfa9, roughness: 0.95, metalness: 0 }),
-    tecidoEscuro: new THREE.MeshStandardMaterial({ color: 0x4a4640, roughness: 0.9, metalness: 0 }),
-    roupaCama:    new THREE.MeshStandardMaterial({ color: 0xf1ece1, roughness: 0.85, metalness: 0 }),
+    // Tecidos com microestrutura. Estofado de cor lisa e roughness
+    // constante lê como plástico fosco; a trama é o que dá leitura de
+    // tecido, e ela aparece justamente no realce especular fraco.
+    tecidoSofa:   new THREE.MeshStandardMaterial({
+      color: 0xcabfa9,
+      normalMap: (() => { const t = noiseNormalTexture(32, 0.9); t.repeat.set(4, 4); return t; })(),
+      normalScale: new THREE.Vector2(0.3, 0.3), roughness: 0.95, metalness: 0 }),
+    tecidoEscuro: new THREE.MeshStandardMaterial({
+      color: 0x4a4640,
+      normalMap: (() => { const t = noiseNormalTexture(32, 0.9); t.repeat.set(4, 4); return t; })(),
+      normalScale: new THREE.Vector2(0.3, 0.3), roughness: 0.9, metalness: 0 }),
+    roupaCama:    new THREE.MeshStandardMaterial({
+      color: 0xf1ece1,
+      normalMap: (() => { const t = noiseNormalTexture(24, 0.7); t.repeat.set(3, 3); return t; })(),
+      normalScale: new THREE.Vector2(0.22, 0.22), roughness: 0.88, metalness: 0 }),
     tapete:       new THREE.MeshStandardMaterial({ map: rugPatternTexture('#d8cdb8', '#a3937a'), roughness: 1.0, metalness: 0 }),
     banheira:     new THREE.MeshStandardMaterial({ color: 0xf4f1ea, roughness: 0.25, metalness: 0 }),
     gramado:      new THREE.MeshStandardMaterial({
@@ -1883,9 +2025,15 @@ function buildMaterials() {
       map: leafCardTexture('#3f5d3a', { narrow: true, count: 170, leafScale: 1.15 }), alphaTest: 0.42, side: THREE.DoubleSide,
       roughness: 0.95, metalness: 0, envMapIntensity: 0.28,
     }),
-    // Gramínea de primeiro plano: lâminas soltas, mais claras e secas.
+    // Arbusto: folha pequena e densa. Reaproveitar a textura de copa
+    // deixava o arbusto ralo, com aspecto de galho seco.
+    arbusto:      new THREE.MeshStandardMaterial({
+      map: leafCardTexture('#4a6437', { count: 300, leafScale: 0.52 }), alphaTest: 0.4, side: THREE.DoubleSide,
+      roughness: 0.96, metalness: 0, envMapIntensity: 0.28,
+    }),
+    // Gramínea de primeiro plano: lâminas saindo da base do cartão.
     graminea:     new THREE.MeshStandardMaterial({
-      map: leafCardTexture('#8a9a55', { narrow: true, count: 90, leafScale: 1.5 }), alphaTest: 0.4, side: THREE.DoubleSide,
+      map: grassBladeCardTexture('#8a9a55'), alphaTest: 0.35, side: THREE.DoubleSide,
       roughness: 0.98, metalness: 0, envMapIntensity: 0.25,
     }),
     bordaPiscina: new THREE.MeshStandardMaterial({ map: stoneVeinTexture('#e0dcd4', '#c9c2b4'), roughness: 0.7, metalness: 0 }),
@@ -1894,7 +2042,7 @@ function buildMaterials() {
     terraco:      new THREE.MeshStandardMaterial({ map: paverTexture('#ded2bd', '#a99a83', 4), roughness: 0.5, metalness: 0 }),
     caminho:      new THREE.MeshStandardMaterial({ map: paverTexture('#c9beac', '#8f8272', 2), roughness: 0.6, metalness: 0 }),
     cascalho:     new THREE.MeshStandardMaterial({ map: gravelTexture('#a89e8c'), roughness: 1.0, metalness: 0 }),
-    canteiro:     new THREE.MeshStandardMaterial({ color: 0x3a3126, roughness: 1.0, metalness: 0 }),
+    canteiro:     new THREE.MeshStandardMaterial({ map: gravelTexture('#5a4a37'), roughness: 1.0, metalness: 0 }),
     meioFio:      new THREE.MeshStandardMaterial({ color: 0xb9b2a2, roughness: 0.75, metalness: 0 }),
 
     vidro: new THREE.MeshPhysicalMaterial({
@@ -2286,6 +2434,9 @@ function buildArchitecture() {
   // A partir daqui tudo vai para upperMass, um grupo separado que o
   // "Modo Corte" consegue erguer para revelar a planta do térreo.
   upperMass = new THREE.Group();
+  // Raiz de fusão própria: sobe no Modo Corte, então não pode ser
+  // fundida junto com a arquitetura fixa.
+  upperMass.userData.mergeRoot = true;
 
   const roofSlabGeo = new THREE.BoxGeometry(24.6, 0.35, 13.0);
   // A face de baixo (forro) era Cumaru escuro. Nenhuma luz bate nela por
@@ -3522,15 +3673,15 @@ function emitTree(cardOut, trunkOut, x, z, opts) {
 // Arbusto: mesma ideia sem tronco, mais achatado e mais denso embaixo.
 function emitShrub(cardOut, x, z, scale) {
   const s = scale || 1;
-  const n = 5 + Math.floor(Math.random() * 4);
+  const n = 9 + Math.floor(Math.random() * 5);
   for (let i = 0; i < n; i++) {
     const u = Math.random() * 0.9;
     const phi = Math.random() * Math.PI * 2;
     const rr = Math.sqrt(1 - u * u);
     _tDir.set(rr * Math.cos(phi), u * 0.8 + 0.15, rr * Math.sin(phi));
     pushCard(cardOut,
-      x + _tDir.x * 0.36 * s, 0.22 * s + _tDir.y * 0.26 * s, z + _tDir.z * 0.36 * s,
-      _tDir, (0.52 + Math.random() * 0.3) * s);
+      x + _tDir.x * 0.3 * s, 0.2 * s + _tDir.y * 0.24 * s, z + _tDir.z * 0.3 * s,
+      _tDir, (0.46 + Math.random() * 0.24) * s);
   }
 }
 
@@ -3705,6 +3856,7 @@ function buildLandscaping() {
   applyWind(M.copaArvore, 0.05);
   applyWind(M.copaArvore2, 0.045);
   applyWind(M.copaArvore3, 0.055);
+  applyWind(M.arbusto, 0.035);
   applyWind(M.graminea, 0.09);
 
   // Tronco cônico de verdade (topo 55% da base), não cilindro reto.
@@ -3719,7 +3871,7 @@ function buildLandscaping() {
   if (imTrunk) g.add(imTrunk);
   // Arbusto e gramínea não projetam sombra: são centenas de quads no
   // shadow map por um ganho que a sombra de contato do gramado já dá.
-  const imShrub = buildInstanced(unitCard, M.copaArvore2, shrubT, false);
+  const imShrub = buildInstanced(unitCard, M.arbusto, shrubT, false);
   if (imShrub) g.add(imShrub);
   const imGrass = buildInstanced(unitCard, M.graminea, grassT, false);
   if (imGrass) g.add(imGrass);
@@ -4110,11 +4262,13 @@ async function buildScene(onProgress) {
   // onde as câmeras olham para não ser plantada na frente delas.
   buildChaptersAndHotspots();
 
+  const builtGroups = [];
   for (let i = 0; i < steps.length; i++) {
     const [name, fn] = steps[i];
     BuildTrace.start(name);
     try {
-      fn();
+      const r = fn();
+      if (r && r.isObject3D) builtGroups.push([name, r]);
     } catch (e) {
       BuildTrace.fail(name, e);
       throw e;
@@ -4126,6 +4280,13 @@ async function buildScene(onProgress) {
   }
 
   optimizeShadowCasters();
+
+  // Fusão DEPOIS de optimizeShadowCasters: os sinalizadores de sombra já
+  // estão resolvidos e entram na chave do agrupamento.
+  let mergedSaved = 0;
+  builtGroups.forEach(([name, grp]) => { mergedSaved += mergeStaticByMaterial(grp, name); });
+  if (upperMass) mergedSaved += mergeStaticByMaterial(upperMass, 'Volume Superior');
+  if (DEBUG) console.info('Fusão estática: -' + mergedSaved + ' draw calls no total');
 
   BuildTrace.start('chapters-hotspots');
   BuildTrace.complete('chapters-hotspots');
@@ -4149,6 +4310,115 @@ async function buildScene(onProgress) {
 // com todos eles a cada frame. Objetos pequenos (puxadores, livros,
 // talheres decorativos) não alteram a silhueta de sombra de forma
 // perceptível — desligá-los é ganho puro, sem perda visual.
+// ============================================================
+// FUSÃO DE GEOMETRIA ESTÁTICA — a correção nº1 de performance
+// ------------------------------------------------------------
+// MEDIDO no renderizador headless, capítulo "Chegada": 1201 draw calls
+// para 176 mil triângulos. A conta denuncia o problema — são ~147
+// triângulos por chamada. O custo não está na geometria, está no número
+// de objetos: cada puxador, cada almofada, cada degrau é um Mesh, e cada
+// Mesh é uma chamada de desenho separada.
+//
+// A solução é fundir, DENTRO de cada grupo que se move junto, todas as
+// malhas estáticas que compartilham o mesmo material. O resultado é
+// visualmente idêntico (mesma geometria, mesma matriz de mundo) e passa
+// a ser uma chamada por material em vez de uma por objeto.
+//
+// O que NÃO é fundido, e por quê:
+//  - InstancedMesh: já é 1 chamada, fundir seria regressão;
+//  - material transparente: a ordenação por objeto é o que faz vidro,
+//    água e sombra de contato aparecerem na ordem certa;
+//  - qualquer objeto marcado userData.noMerge: luminárias que precisam
+//    de posição própria, hotspots, e tudo que é animado;
+//  - grupos que se movem sozinhos (upperMass no Modo Corte) são fundidos
+//    SEPARADAMENTE, então continuam podendo subir.
+// ============================================================
+function mergeStaticByMaterial(root, label) {
+  if (!root || !BufferGeometryUtils || !BufferGeometryUtils.mergeGeometries) return 0;
+
+  root.updateWorldMatrix(true, true);
+  const rootInv = new THREE.Matrix4().copy(root.matrixWorld).invert();
+  const buckets = new Map();   // chave -> { mat, geos[], srcs[], cast, receive }
+
+  // Percurso próprio em vez de traverse(): precisa PARAR ao encontrar
+  // outro grupo que se move sozinho (userData.mergeRoot), senão o Modo
+  // Corte pararia de funcionar — o volume superior seria fundido junto
+  // com a arquitetura fixa e não teria mais como subir.
+  const walk = (node, visit) => {
+    for (const child of node.children) {
+      if (child.userData && child.userData.mergeRoot) continue;
+      visit(child);
+      walk(child, visit);
+    }
+  };
+
+  walk(root, (o) => {
+    if (!o.isMesh || o.isInstancedMesh || o.isSkinnedMesh) return;
+    if (o.userData.noMerge) return;
+    // Objetos com lógica de render própria — o Water.js é o caso concreto:
+    // ele renderiza a cena num render target no onBeforeRender e reflete
+    // no próprio plano. Fundido, a piscina perderia a reflexão inteira.
+    if (o.onBeforeRender && o.onBeforeRender !== THREE.Object3D.prototype.onBeforeRender) return;
+    const mat = o.material;
+    if (!mat || Array.isArray(mat)) return;
+    if (mat.isShaderMaterial || mat.isRawShaderMaterial) return;
+    if (mat.transparent || mat.blending !== THREE.NormalBlending) return;
+    if (!o.geometry || !o.geometry.attributes || !o.geometry.attributes.position) return;
+    // um objeto invisível fundido volta a aparecer — mantém separado
+    if (!o.visible) return;
+
+    // castShadow entra na chave: fundir um caixote que projeta sombra com
+    // um que não projeta obrigaria a escolher um dos dois comportamentos
+    const key = mat.uuid + '|' + (o.castShadow ? 1 : 0) + '|' + (o.receiveShadow ? 1 : 0);
+    let b = buckets.get(key);
+    if (!b) { b = { mat, geos: [], srcs: [], cast: o.castShadow, receive: o.receiveShadow }; buckets.set(key, b); }
+
+    const g = o.geometry.clone();
+    // matriz relativa à raiz do grupo: o grupo continua podendo se mover
+    g.applyMatrix4(new THREE.Matrix4().multiplyMatrices(rootInv, o.matrixWorld));
+    // mergeGeometries exige o mesmo conjunto de atributos em todas
+    for (const name of Object.keys(g.attributes)) {
+      if (name !== 'position' && name !== 'normal' && name !== 'uv') g.deleteAttribute(name);
+    }
+    if (!g.attributes.uv) {
+      g.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(g.attributes.position.count * 2), 2));
+    }
+    if (!g.attributes.normal) g.computeVertexNormals();
+    b.geos.push(g);
+    b.srcs.push(o);
+  });
+
+  let saved = 0;
+  buckets.forEach((b) => {
+    // Um material com um objeto só não ganha nada — e removê-lo sem
+    // fundir apagaria o objeto da cena. Este era o defeito a evitar aqui.
+    if (b.geos.length < 2) { b.geos.forEach(g => g.dispose()); return; }
+    let merged = null;
+    try {
+      merged = BufferGeometryUtils.mergeGeometries(b.geos, false);
+    } catch (e) {
+      if (DEBUG) console.warn('fusão falhou para um material, mantendo separado:', e);
+    }
+    b.geos.forEach(g => g.dispose());
+    if (!merged) return;   // falhou: originais permanecem intactos
+
+    const mesh = new THREE.Mesh(merged, b.mat);
+    mesh.castShadow = b.cast;
+    mesh.receiveShadow = b.receive;
+    mesh.userData.merged = true;
+    root.add(mesh);
+    saved += b.srcs.length - 1;
+    // só agora, com o substituto na cena, os originais saem
+    b.srcs.forEach((o) => {
+      if (o.parent) o.parent.remove(o);
+      if (o.geometry) o.geometry.dispose();
+    });
+  });
+
+  if (DEBUG) console.info('fusão[' + label + ']: -' + saved + ' draw calls');
+  return saved;
+}
+
 function optimizeShadowCasters() {
   let off = 0, kept = 0;
   houseGroup.traverse((o) => {
