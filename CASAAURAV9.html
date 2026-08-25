@@ -1360,7 +1360,7 @@ function applySolarTime(t) {
   // exatamente o que uma piscina de alto padrão faz ao vivo.
   if (M && M.revestPiscina) M.revestPiscina.emissiveIntensity = 0.35 + s.lamp * 1.15;
   // Balizadores de fachada acendem junto com o resto da casa.
-  uplightUniform.value = s.lamp * 0.42;
+  uplightUniform.value = s.lamp * 1.30;
   renderer.toneMappingExposure = s.exp;
   poolLight.intensity = s.pool;
   // WOW #3 — Acendimento escalonado ao anoitecer.
@@ -2498,8 +2498,8 @@ function buildMaterials() {
   const balizadoresTier = (Quality.level === 'low' || Quality.level === 'medium')
     ? balizadores.filter((_, i) => i % 2 === 0)
     : balizadores;
-  applyUplightWash(M.estuque, balizadoresTier, 2.8, 3.0);
-  applyUplightWash(M.stoneCore, [[3.4, 0.05, -4.2], [3.4, 0.05, 3.6]], 2.4, 4.2);
+  applyUplightWash(M.estuque, balizadoresTier, 3.6, 3.4);
+  applyUplightWash(M.stoneCore, [[3.4, 0.05, -4.2], [3.4, 0.05, 3.6]], 3.0, 4.6);
   applyMacroVariation(M.travertino, 5.0, 0.06);
 
   // Sem anisotropia, uma textura repetida 450x vira ruído cintilante em
