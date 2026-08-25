@@ -1334,6 +1334,9 @@ function applySolarTime(t) {
   // cômodo conforme o sol cai — como uma casa real sendo ocupada.
   // luz de janela cai junto com o sol e esfria ao entardecer
   for (let i = 0; i < rectLights.length; i++) {
+    // window.__RECT_K é um ponto de ajuste deliberado: permite calibrar a
+    // luz de janela pelo console no aparelho real, ou pela varredura
+    // automatizada em .devtest/tune.mjs, sem recompilar nada.
     rectLights[i].intensity = Math.max(0, (1.0 - solarTime * 1.25)) * (window.__RECT_K || RECT_K);
     rectLights[i].color.setHex(solarTime < 0.5 ? 0xf2ede2 : 0xf5d9b4);
   }
