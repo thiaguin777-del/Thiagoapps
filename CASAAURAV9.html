@@ -1342,7 +1342,7 @@ function applySolarTime(t) {
   // objetivo. Fazendo o revestimento acompanhar a rampa das luminárias,
   // ela vira o elemento luminoso da composição noturna, que é
   // exatamente o que uma piscina de alto padrão faz ao vivo.
-  if (M && M.revestPiscina) M.revestPiscina.emissiveIntensity = 0.28 + s.lamp * 0.62;
+  if (M && M.revestPiscina) M.revestPiscina.emissiveIntensity = 0.35 + s.lamp * 1.15;
   renderer.toneMappingExposure = s.exp;
   poolLight.intensity = s.pool;
   // WOW #3 — Acendimento escalonado ao anoitecer.
@@ -2282,7 +2282,7 @@ function buildMaterials() {
     // sol baixo. Nao e brilho: 0,3 apenas impede a cavidade de fechar.
     revestPiscina:new THREE.MeshStandardMaterial({
       color: 0x74c0ca, roughness: 0.28, metalness: 0, envMapIntensity: 0.55,
-      emissive: 0x2b7c8a, emissiveIntensity: 0.3 }),
+      emissive: 0x3fa8bd, emissiveIntensity: 0.35 }),
     vaso:         new THREE.MeshStandardMaterial({ color: 0xd8d2c6, roughness: 0.8, metalness: 0 }),
     terraco:      new THREE.MeshStandardMaterial({ map: paverTexture('#ded2bd', '#a99a83', 4), roughness: 0.5, metalness: 0 }),
     caminho:      new THREE.MeshStandardMaterial({ map: paverTexture('#c9beac', '#8f8272', 2), roughness: 0.6, metalness: 0 }),
