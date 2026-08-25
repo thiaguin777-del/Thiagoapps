@@ -208,7 +208,8 @@ o código não substitui olhar a imagem.
 | 1 MB baixado à toa | leitura do arquivo | GLB embutidos decodificados em todo carregamento, mas descartados sem `?models=1` |
 | 34 requisições 404 por carga | console do teste | a pasta `assets/` opcional era sondada arquivo a arquivo |
 | **Luz de janela iluminando para fora** | varredura medida: subir a intensidade de 3,4 → 400 mudava a panorâmica externa (119,9 → 140,7) e **não mexia** o interior (129,3 → 129,2) | `RectAreaLight` emite no **−Z local**; o `rotation.y = π` virava a emissão para o jardim. A luz de vão envidraçado nunca chegou ao interior — daí os ambientes frios |
-| Noite lendo como fim de tarde | capítulo "Visão Final" | o modelo de Preetham do `Sky.js` não trata sol **abaixo** do horizonte e continua devolvendo céu claro |
+| "Noite lendo como fim de tarde" | capítulo "Visão Final" | **falso positivo do harness**: o `shoot.mjs` não aplicava o `light` do capítulo, então toda cena noturna era renderizada com luz de dia |
+| Arquitetura sumindo à noite | mesma câmera, já com a luz correta | `glassGlow` em 0,32 virava painel âmbar chapado; preenchimento da parada `night` baixo demais; e o céu de Preetham colapsa para preto com o sol abaixo do horizonte |
 
 ## 8. Se for continuar
 
