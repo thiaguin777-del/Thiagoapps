@@ -907,13 +907,18 @@ async function init() {
   // heliodon. Não é truque de cor — é o mesmo papel que a atmosfera faz,
   // aplicado onde o modelo analítico deixa de valer.
   // ------------------------------------------------------------
+  // O Sky usa ShaderMaterial. Para ShaderMaterial o Three.js monta o
+  // programa a partir de material.uniforms / material.fragmentShader
+  // DIRETAMENTE — o objeto entregue a onBeforeCompile não é a fonte dos
+  // uniforms, e por isso a primeira tentativa por lá não teve efeito
+  // nenhum (o céu continuou claro à noite no render). Aqui o uniform e o
+  // shader são alterados no próprio material, antes da primeira compilação.
   skyNightFade = { value: 1 };
-  sky.material.onBeforeCompile = (sh) => {
-    sh.uniforms.uSkyFade = skyNightFade;
-    sh.fragmentShader = 'uniform float uSkyFade;\n' + sh.fragmentShader.replace(
+  sky.material.uniforms.uSkyFade = skyNightFade;
+  sky.material.fragmentShader = 'uniform float uSkyFade;\n' +
+    sky.material.fragmentShader.replace(
       'gl_FragColor = vec4( retColor, 1.0 );',
       'gl_FragColor = vec4( retColor * uSkyFade, 1.0 );');
-  };
   sky.material.needsUpdate = true;
   scene.add(sky);
 
@@ -1303,7 +1308,7 @@ function applySolarTime(t) {
   // A água é MeshPhysicalMaterial (ver buildPoolAndDeck): escurece e
   // esfria ao anoitecer em vez de trocar uniform de shader.
   if (waterObj && waterObj.material && !waterObj.material.uniforms) {
-    waterObj.material.color.setHex(solarTime > 0.7 ? 0x11414f : 0x2b7f95);
+    waterObj.material.color.setHex(solarTime > 0.7 ? 0x18576b : 0x3f9aad);
   }
   // O environment é regenerado a partir do céu (não a cada frame: só
   // quando o sol andou o suficiente para valer o custo).
@@ -2257,7 +2262,7 @@ function buildMaterials() {
       normalMap: (() => { const t = noiseNormalTexture(14, 0.8); t.repeat.set(1, 1); return t; })(),
       normalScale: new THREE.Vector2(0.24, 0.24),
       roughness: 0.72, metalness: 0 }),
-    revestPiscina:new THREE.MeshStandardMaterial({ color: 0x2e7387, roughness: 0.32, metalness: 0, envMapIntensity: 0.4 }),
+    revestPiscina:new THREE.MeshStandardMaterial({ color: 0x63b3bf, roughness: 0.3, metalness: 0, envMapIntensity: 0.4 }),
     vaso:         new THREE.MeshStandardMaterial({ color: 0xd8d2c6, roughness: 0.8, metalness: 0 }),
     terraco:      new THREE.MeshStandardMaterial({ map: paverTexture('#ded2bd', '#a99a83', 4), roughness: 0.5, metalness: 0 }),
     caminho:      new THREE.MeshStandardMaterial({ map: paverTexture('#c9beac', '#8f8272', 2), roughness: 0.6, metalness: 0 }),
@@ -2303,11 +2308,11 @@ function buildMaterials() {
     // 3. roughness/clearcoat plausíveis para água parada de piscina,
     //    não para um espelho.
     agua: new THREE.MeshPhysicalMaterial({
-      color: 0x2b7f95,
-      roughness: 0.10, metalness: 0,
+      color: 0x3f9aad,
+      roughness: 0.09, metalness: 0,
       // opacidade baixa de propósito: o argumento de venda da piscina é
       // ver o revestimento e o desnível do fundo ATRAVÉS da água
-      transparent: true, opacity: 0.55,
+      transparent: true, opacity: 0.45,
       clearcoat: 0.7, clearcoatRoughness: 0.06,
       // reflexo contido: em ângulo rasante um envMap forte transforma a
       // lâmina em espelho de céu e o fundo desaparece
