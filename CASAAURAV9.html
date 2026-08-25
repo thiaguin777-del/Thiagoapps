@@ -2931,6 +2931,27 @@ function buildMaterials() {
   applyUplightWash(M.stoneCore, [[3.4, 0.05, -4.2], [3.4, 0.05, 3.6]], 3.0, 4.6);
   applyMacroVariation(M.travertino, 5.0, 0.06);
 
+  // ------------------------------------------------------------
+  // OCLUSÃO DO IBL PARA MATERIAIS DE INTERIOR
+  // ------------------------------------------------------------
+  // O mapa de ambiente é aplicado SEM OCLUSÃO: um tapete dentro do
+  // quarto recebe a abóbada celeste inteira, exatamente como se
+  // estivesse no jardim. Como o céu é azul e o interior é escuro, toda
+  // superfície clara de dentro puxava para cinza-azulado — foi o que
+  // fez o piso do quarto ler como ardósia e o tapete de lã como concreto
+  // molhado.
+  //
+  // Não há oclusão de IBL em tempo real sem ray tracing. O que se faz em
+  // archviz é o que está aqui: material que vive DENTRO recebe uma
+  // fração do ambiente, porque na prática ele enxerga teto e paredes, e
+  // não o céu. O GTAO cuida do contato; isto cuida do hemisfério.
+  const interiores = {
+    tapete: 0.10, tecidoSofa: 0.10, tecidoEscuro: 0.10, roupaCama: 0.12,
+    banheira: 0.22, vaso: 0.16, portaEscura: 0.14, bancada: 0.30,
+    madeiraClara: 0.20, forroMadeira: 0.14, latao: 0.45, metal: 0.55,
+  };
+  Object.keys(interiores).forEach(k => { if (M[k]) M[k].envMapIntensity = interiores[k]; });
+
   // Sem anisotropia, uma textura repetida 450x vira ruído cintilante em
   // ângulo rasante — que é exatamente como se olha um gramado.
   const aniso = (renderer && renderer.capabilities)
