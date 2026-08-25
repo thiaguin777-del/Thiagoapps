@@ -1,0 +1,197 @@
+/* ============================================================
+   Casa Aura Ultra — componentes novos da migração
+   ------------------------------------------------------------
+   Só o que não existia no estilo herdado: hotspots em DOM, painel
+   comercial, convite e o track solar novo. O resto continua em
+   estilo.css, que veio junto com a cena.
+   ============================================================ */
+
+:root {
+  --aura-vidro: rgba(18, 20, 24, 0.55);
+  --aura-borda: rgba(255, 255, 255, 0.14);
+  --aura-ouro: #c9a227;
+  --aura-creme: #e8e2d6;
+}
+
+/* ---------- HOTSPOTS ---------- */
+/* Projetados por JS; aqui só a aparência. O `transform` vem do
+   HotspotManager e é sobrescrito a cada quadro, então nada de transition
+   nele — seria um quadro de atraso colado na câmera. */
+.hotspot {
+  position: absolute;
+  top: 0; left: 0;
+  width: 34px; height: 34px;
+  padding: 0; border: 0; background: none;
+  cursor: pointer;
+  will-change: transform;
+}
+
+.hs-nucleo {
+  position: absolute; inset: 12px;
+  border-radius: 50%;
+  background: var(--aura-creme);
+  box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
+}
+
+.hs-anel {
+  position: absolute; inset: 0;
+  border-radius: 50%;
+  border: 1.5px solid var(--aura-creme);
+  opacity: 0.85;
+  animation: hs-pulso 2.6s ease-out infinite;
+}
+
+@keyframes hs-pulso {
+  0%   { transform: scale(0.55); opacity: 0.9; }
+  70%  { transform: scale(1.35); opacity: 0;   }
+  100% { transform: scale(1.35); opacity: 0;   }
+}
+
+/* Respeita quem pediu menos movimento no sistema. Um anel pulsando sem
+   parar é exatamente o tipo de coisa que incomoda de verdade. */
+@media (prefers-reduced-motion: reduce) {
+  .hs-anel { animation: none; opacity: 0.5; }
+}
+
+.hs-balao {
+  position: absolute;
+  left: 50%; bottom: 46px;
+  transform: translateX(-50%) translateY(6px);
+  min-width: 190px; max-width: 260px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--aura-borda);
+  background: var(--aura-vidro);
+  backdrop-filter: blur(14px) saturate(1.3);
+  -webkit-backdrop-filter: blur(14px) saturate(1.3);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+  text-align: left;
+  opacity: 0; pointer-events: none;
+  transition: opacity 0.22s ease, transform 0.22s ease;
+}
+
+.hotspot.aberto .hs-balao {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+.hs-balao strong {
+  display: block;
+  font-family: 'Fraunces', Georgia, serif;
+  font-size: 14px; font-weight: 400;
+  color: var(--aura-creme);
+  margin-bottom: 4px;
+}
+
+.hs-balao em {
+  display: block;
+  font-style: normal;
+  font-size: 12px; line-height: 1.5;
+  color: rgba(232, 226, 214, 0.72);
+}
+
+/* ---------- PLANOS ---------- */
+#planos {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 18px;
+  margin: 28px 0;
+}
+
+.plano {
+  padding: 24px 22px;
+  border-radius: 16px;
+  border: 1px solid var(--aura-borda);
+  background: rgba(255, 255, 255, 0.035);
+  transform-style: preserve-3d;
+}
+
+.plano.destaque {
+  border-color: rgba(201, 162, 39, 0.5);
+  background: rgba(201, 162, 39, 0.07);
+}
+
+.plano h4 {
+  font-family: 'Fraunces', Georgia, serif;
+  font-size: 20px; font-weight: 400;
+  margin: 0 0 6px; color: var(--aura-creme);
+}
+
+.plano-preco {
+  font-size: 15px; color: var(--aura-ouro);
+  margin: 0 0 16px;
+}
+.plano-preco span {
+  display: block;
+  font-size: 12px;
+  color: rgba(232, 226, 214, 0.5);
+}
+
+.plano ul { list-style: none; padding: 0; margin: 0 0 20px; }
+.plano li {
+  font-size: 13px; line-height: 1.9;
+  color: rgba(232, 226, 214, 0.78);
+  padding-left: 16px; position: relative;
+}
+.plano li::before {
+  content: '—';
+  position: absolute; left: 0;
+  color: var(--aura-ouro);
+}
+.plano-cta { width: 100%; }
+
+/* ---------- CONVITE (aparece após 60s explorando) ---------- */
+#convite-comercial {
+  position: fixed;
+  right: 20px; bottom: 92px;
+  z-index: 60;
+  display: flex; align-items: center; gap: 10px;
+  padding: 14px 16px;
+  border-radius: 14px;
+  border: 1px solid var(--aura-borda);
+  background: var(--aura-vidro);
+  backdrop-filter: blur(16px) saturate(1.3);
+  -webkit-backdrop-filter: blur(16px) saturate(1.3);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5);
+  max-width: min(92vw, 420px);
+}
+
+#convite-comercial p {
+  margin: 0; font-size: 13px;
+  color: rgba(232, 226, 214, 0.8);
+  white-space: nowrap;
+}
+
+.convite-nao {
+  background: none; border: 0;
+  color: rgba(232, 226, 214, 0.45);
+  font-size: 20px; line-height: 1;
+  cursor: pointer; padding: 2px 6px;
+}
+.convite-nao:hover { color: var(--aura-creme); }
+
+@media (max-width: 640px) {
+  #convite-comercial {
+    right: 12px; left: 12px; bottom: 84px;
+    flex-wrap: wrap;
+  }
+  #convite-comercial p { white-space: normal; }
+}
+
+/* ---------- MODO LEVE ---------- */
+/* Ativado pelo QualityController quando o aparelho não dá conta. É um
+   estado ANUNCIADO, não silencioso: o cliente merece saber por que a
+   imagem mudou. */
+#aviso-modo-leve {
+  position: fixed; left: 50%; bottom: 20px;
+  transform: translateX(-50%);
+  z-index: 70;
+  padding: 10px 16px;
+  border-radius: 10px;
+  border: 1px solid var(--aura-borda);
+  background: var(--aura-vidro);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  font-size: 12px;
+  color: rgba(232, 226, 214, 0.8);
+}

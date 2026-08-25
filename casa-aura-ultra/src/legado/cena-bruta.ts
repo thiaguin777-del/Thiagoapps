@@ -7028,6 +7028,13 @@ function animate() {
     renderer.render(scene, camera);
   }
 
+  // Gancho por quadro para os modulos TIPADOS (QualityController etc.).
+  // E um ponto de extensao para a migracao: quem foi esculpido para fora
+  // do legado se pendura aqui em vez de o legado importar de volta, o que
+  // criaria dependencia circular.
+  const ganchos = (window as any).__auraPorQuadro;
+  if (ganchos) { for (let i = 0; i < ganchos.length; i++) ganchos[i](); }
+
   frameCount++;
   const now = performance.now();
   // Média móvel do tempo de quadro. Serve ao painel de debug e ao
