@@ -137,9 +137,12 @@ export class CasaAuraScene {
     );
     this.particulas.adicionar(criarPoeira(caixa, { densidade }));
 
-    // Churrasqueira da área gourmet, lado oeste do deck.
+    // Churrasqueira da área gourmet. A coordenada é a do `grillBody` em
+    // buildPoolAndDeck (pergolaX + 1,5 = 2,7 / pergolaZ = 10,4), com a
+    // origem 15 cm acima do tampo em 0,89. Na primeira versão eu chutei
+    // (-12,2 / 2,4) e a fumaça saía de dentro da casa.
     this.particulas.adicionar(
-      criarFumaca(new THREE.Vector3(-12.2, 1.35, 2.4), { densidade }),
+      criarFumaca(new THREE.Vector3(2.7, 1.04, 10.4), { densidade }),
     );
 
     // Pássaros altos e longe: dão vida sem disputar atenção com a casa.
