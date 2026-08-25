@@ -45,6 +45,22 @@ const out = await page.evaluate(() => {
   };
 });
 
+// Uma imagem só, para medir exposição/cor sem pagar a bateria inteira.
+if (process.env.AURA_SHOT) {
+  const [nm, px, py, pz, lx, ly, lz] = process.env.AURA_SHOT.split(',');
+  await page.evaluate(([p, l]) => {
+    ['loader','hero','top-bar','bottom-bar','commercial','debug-panel','cta-whatsapp','present-controls','ch-overlay','nav-dots','hs-label'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) { el.classList.add('hidden'); el.classList.remove('visible','show'); el.style.display = 'none'; }
+    });
+    window.__AURA.renderer.setPixelRatio(1);
+    window.__AURA.shot(p, l);
+  }, [[+px, +py, +pz], [+lx, +ly, +lz]]);
+  await page.waitForTimeout(800);
+  await page.screenshot({ path: nm, timeout: 300000, animations: 'disabled' });
+  console.log('imagem:', nm);
+}
+
 console.log(JSON.stringify(out, null, 2));
 if (logs.length) console.log('--- CONSOLE ---\n' + logs.slice(0, 25).join('\n'));
 await browser.close();

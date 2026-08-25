@@ -34,6 +34,47 @@ window.__AURA = {
     // anterior junto — o clamp continua valendo no uso real.
     _camPrev.copy(camera.position);
   },
+  // Histograma lido do próprio canvas, no MESMO passo síncrono do
+  // render — sem preserveDrawingBuffer o buffer já teria sido limpo se
+  // esperássemos o frame seguinte. Isto substitui screenshot+PIL e faz a
+  // calibração de luz custar milissegundos em vez de minutos.
+  metrics(){
+    if (composer && !composerFailed) composer.render(); else renderer.render(scene, camera);
+    const src = renderer.domElement;
+    const t = document.createElement('canvas');
+    t.width = 320; t.height = 180;
+    const x = t.getContext('2d');
+    x.drawImage(src, 0, 0, t.width, t.height);
+    const d = x.getImageData(0, 0, t.width, t.height).data;
+    let sr = 0, sg = 0, sb = 0, clip = 0, hot = 0, dark = 0, n = 0;
+    for (let i = 0; i < d.length; i += 4) {
+      const r = d[i], g = d[i+1], b = d[i+2];
+      const l = 0.2126*r + 0.7152*g + 0.0722*b;
+      sr += r; sg += g; sb += b;
+      if (l > 250) clip++;
+      if (l > 240) hot++;
+      if (l < 12) dark++;
+      n++;
+    }
+    return {
+      lum: +((0.2126*sr + 0.7152*sg + 0.0722*sb) / n).toFixed(1),
+      clip: +(clip / n * 100).toFixed(2),
+      hot: +(hot / n * 100).toFixed(2),
+      dark: +(dark / n * 100).toFixed(2),
+      br: +((sb - sr) / n).toFixed(1),
+    };
+  },
+  // Aplica um conjunto de parâmetros de luz sem recarregar a página.
+  tune(o){
+    if (o.sunI !== undefined) LP.day.sunI = o.sunI;
+    if (o.hemiI !== undefined) LP.day.hemiI = o.hemiI;
+    if (o.amb !== undefined) LP.day.amb = o.amb;
+    if (o.envI !== undefined) LP.day.envI = o.envI;
+    if (o.exp !== undefined) LP.day.exp = o.exp;
+    lastEnvT = -99;
+    applySolarTime(0);
+  },
+  LP,
   // renderer.info zera a cada render; lido depois do composer ele conta
   // só o quad final. Para medir a cena de verdade, renderiza direto.
   stats(){
