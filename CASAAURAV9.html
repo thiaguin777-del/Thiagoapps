@@ -4832,10 +4832,14 @@ function buildChaptersAndHotspots() {
     // e mirar um interior desfocado.
     { id: 8, dur: 5, title: 'Terraço Superior', desc: 'Nível de cima, em balanço sobre a área social.',
       cam: { pos: [3.2, 5.4, 6.2], look: [-2.2, 4.1, 0.6] }, light: 'golden' },
-    // Rasante à lâmina d'água: a piscina ocupa o primeiro plano inteiro e
-    // a casa fecha o fundo.
+    // CORRIGIDO renderizando: a câmera anterior ficava a 1,7 m rasando a
+    // lâmina, e nesse ângulo não se via NADA da piscina — só o muro da
+    // lâmina d'água e o reflexo do céu. Agora olha de cima para dentro
+    // da água (~20° de mergulho), que é como se fotografa piscina: o
+    // revestimento, o desnível do fundo e os degraus aparecem, e a casa
+    // ainda fecha o enquadramento atrás.
     { id: 9, dur: 5, title: 'Piscina', desc: 'Borda infinita, deck em ipê e área gourmet coberta.',
-      cam: { pos: [-5.6, 1.7, 16.5], look: [-5.6, 0.9, 9.0] }, light: 'golden' },
+      cam: { pos: [-4.2, 3.3, 17.6], look: [-5.2, 0.15, 9.6] }, light: 'golden' },
     // CORRIGIDO: antes olhava através da parede oeste E da parede de
     // fundo. Agora percorre a faixa de jardim, paralelo à fachada.
     { id: 10, dur: 5, title: 'Paisagismo', desc: 'Vegetação de porte médio e canteiros ao longo do perímetro.',

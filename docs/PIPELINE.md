@@ -183,7 +183,29 @@ estourados, % quase pretos e desvio de azul (B−R). Critério usado:
 
 ---
 
-## 7. Se for continuar
+## 7. Defeitos que só apareceram renderizando
+
+Registro do que a auditoria visual encontrou — todos invisíveis na
+leitura do código, todos corrigidos. Serve de aviso: neste projeto, ler
+o código não substitui olhar a imagem.
+
+| Defeito | Como apareceu | Causa |
+|---|---|---|
+| Piscina sem água | raycast na câmera do capítulo | a borda era uma **laje maciça** de 10,6 × 5,4 m cobrindo a piscina; a água ficava 9 cm abaixo |
+| Fundo da piscina plano | mesma câmera | os 6 segmentos do casco tinham o **topo sempre na mesma cota**; o desnível existia só para baixo, invisível |
+| Degraus submersos invisíveis | consequência do acima | estavam dentro do bloco maciço — geometria morta |
+| Relevo do horizonte invisível | panorâmica | os morros ficavam em y = −9 a −13 com o topo em ≈ −3: **enterrados** |
+| Mundo terminando | panorâmica | névoa 100% além de ~200 m apagava relevo e mata; ampliar o terreno não adiantava |
+| Fachada em sombra branca (255) | medição de histograma | luz do céu somada **três vezes**: IBL + hemisférica + ambiente |
+| Tudo azulado | medição B−R | o PMREM capturava o **disco do sol** e não tinha **chão**: o sol entrava duas vezes e o rebote do solo, nenhuma |
+| Fios verticais na fachada | raycast (`matAt`) | `stoneVeinTexture` desenhava veios de cima a baixo com jitter de 50 px |
+| Textura esticada | recorte ampliado | `BoxGeometry` gera UV 0..1 por face: parede de 14 m e puxador de 12 cm recebiam o mesmo trecho |
+| Grade no gramado distante | panorâmica | moiré de mipmap com 450 repetições em ângulo rasante |
+| Grama dentro da piscina | câmera da piscina | o sorteio de tufos era radial e não conhecia o que havia no terreno |
+| 1 MB baixado à toa | leitura do arquivo | GLB embutidos decodificados em todo carregamento, mas descartados sem `?models=1` |
+| 34 requisições 404 por carga | console do teste | a pasta `assets/` opcional era sondada arquivo a arquivo |
+
+## 8. Se for continuar
 
 **Modelagem 3D.** Não há Blender nem SketchUp neste ambiente. Os GLB em
 `assets/models/*.glb` foram modelados no Blender 4.0 numa sessão
