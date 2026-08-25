@@ -1752,25 +1752,46 @@ function carveCourses(h, size, opts) {
 
   const cav = (i) => { h[i] = Math.max(0, h[i] - prof); };
 
+  // Tom por BLOCO. Sem isto a parede lê como uma textura de pedra
+  // repetida; pedra assentada de verdade tem cada peça vindo de um ponto
+  // diferente da pedreira, e é essa variação bloco a bloco que o olho usa
+  // para reconhecer alvenaria em vez de padrão.
+  const tom = new Float32Array(size * size);
+
   for (let f = 0; f < fiadas; f++) {
     const y0 = bordas[f], y1 = bordas[f + 1];
+    const nBlocos = 2 + Math.floor(rnd() * 3);
+    const off = rnd();
+    // limites verticais dos blocos desta fiada
+    const cortes = [];
+    for (let b = 0; b < nBlocos; b++) cortes.push(Math.round(((b + off) / nBlocos) * size) % size);
+    cortes.sort((a, b) => a - b);
+    const tons = cortes.map(() => rnd());
+
+    // pinta o tom de cada bloco na faixa da fiada
+    for (let y = y0; y < y1; y++) {
+      const yy = y % size;
+      for (let x = 0; x < size; x++) {
+        let idx = 0;
+        for (let b = 0; b < cortes.length; b++) if (x >= cortes[b]) idx = b;
+        tom[yy * size + x] = tons[idx];
+      }
+    }
+
     // junta horizontal no topo da fiada
     for (let d = 0; d < juntaPx; d++) {
       const y = (y0 + d) % size;
       for (let x = 0; x < size; x++) cav(y * size + x);
     }
-    // juntas verticais desta fiada, com deslocamento próprio
-    const nBlocos = 2 + Math.floor(rnd() * 3);
-    const off = rnd();
-    for (let b = 0; b < nBlocos; b++) {
-      const xc = Math.round(((b + off) / nBlocos) * size) % size;
+    // juntas verticais
+    for (const xc of cortes) {
       for (let d = 0; d < juntaPx; d++) {
         const x = (xc + d) % size;
         for (let y = y0 + juntaPx; y < y1; y++) cav((y % size) * size + x);
       }
     }
   }
-  return h;
+  return tom;
 }
 
 function _texFromData(size, data, srgb, repeat) {
@@ -1794,8 +1815,16 @@ function pbrFromHeight(size, h, cor, opts) {
   opts = opts || {};
   const forcaNormal = opts.normalStrength === undefined ? 2.0 : opts.normalStrength;
   const cav = cavityField(h, size, opts.cavityRadius || 3);
-  let cmax = 1e-6;
-  for (let i = 0; i < cav.length; i++) cmax = Math.max(cmax, Math.abs(cav[i]));
+  // BUG CORRIGIDO — cavidade normalizada pelo próprio máximo.
+  // A versão anterior fazia cv = cav/max(|cav|). Num campo LISO (reboco
+  // fino, 3 oitavas de frequência baixa) a cavidade real é minúscula, e
+  // dividir pelo próprio máximo amplificava o piso de ruído numérico até
+  // a escala cheia: as paredes de estuque saíram manchadas, com aspecto
+  // de encardido. Normalização relativa transforma "quase nada" em
+  // "tudo".
+  // Agora o ganho é FIXO por material: campo liso produz cavidade fraca,
+  // que é o correto.
+  const cavGain = opts.cavityGain === undefined ? 9 : opts.cavityGain;
 
   const alb = new Uint8ClampedArray(size * size * 4);
   const nrm = new Uint8ClampedArray(size * size * 4);
@@ -1810,7 +1839,7 @@ function pbrFromHeight(size, h, cor, opts) {
   for (let y = 0; y < size; y++) {
     for (let x = 0; x < size; x++) {
       const i = y * size + x, j = i * 4;
-      const cv = cav[i] / cmax;                    // -1..1
+      const cv = Math.max(-1, Math.min(1, cav[i] * cavGain));
       const cvPos = Math.max(0, cv);               // só reentrância
 
       const rgb = cor(h[i], cv, x, y, size);
@@ -2734,7 +2763,7 @@ function buildMaterials() {
       // MEDIDO no render da suíte: com roughBase 0,46 e variação 0,34 as
       // saliências caíam em 0,12 de rugosidade — piso espelhado, lendo
       // como molhado. Travertino polido de piso fica em torno de 0,45.
-    }, { normalStrength: 1.6, cavityRadius: 3, roughBase: 0.62, roughVar: 0.18,
+    }, { normalStrength: 1.6, cavityRadius: 3, cavityGain: 10, roughBase: 0.62, roughVar: 0.18,
          aoStrength: 0.7, albedoCavity: 0.26 });
     applyPBR(M.travertino, maps, 0.5);
     M.travertino.envMapIntensity = 0.35;
@@ -2751,8 +2780,8 @@ function buildMaterials() {
     const maps = pbrFromHeight(pbrSize, h, (alt) => {
       const t = alt;
       return [_clamp255(226 + t * 16), _clamp255(220 + t * 16), _clamp255(208 + t * 15)];
-    }, { normalStrength: 0.7, cavityRadius: 3, roughBase: 0.9, roughVar: 0.08,
-         aoStrength: 0.3, albedoCavity: 0.1 });
+    }, { normalStrength: 0.7, cavityRadius: 3, cavityGain: 4, roughBase: 0.9, roughVar: 0.06,
+         aoStrength: 0.22, albedoCavity: 0.07 });
     applyPBR(M.estuque, maps, 0.22);
   }
 
@@ -2766,7 +2795,7 @@ function buildMaterials() {
       // de 0,45-0,55 de albedo.
       const v = 118 + t * 26 - Math.max(0, cav) * 18;
       return [_clamp255(v), _clamp255(v * 0.995), _clamp255(v * 0.975)];
-    }, { normalStrength: 1.1, cavityRadius: 3, roughBase: 0.9, roughVar: 0.14,
+    }, { normalStrength: 1.1, cavityRadius: 3, cavityGain: 8, roughBase: 0.9, roughVar: 0.14,
          aoStrength: 0.6, albedoCavity: 0.22 });
     applyPBR(M.concreto, maps, 0.35);
     M.concreto.color.setHex(0xffffff);   // a cor passa a vir do mapa
@@ -2781,12 +2810,15 @@ function buildMaterials() {
   {
     const h = heightField(pbrSize, { octaves: 4, baseFreq: 6, persistence: 0.5, seed: 53 });
     for (let i = 0; i < h.length; i++) h[i] = 0.45 + h[i] * 0.55;   // face do bloco
-    carveCourses(h, pbrSize, { courses: 6, depth: 0.5, jointWidth: 0.008, seed: 11 });
-    const maps = pbrFromHeight(pbrSize, h, (alt, cav) => {
-      // variação de tom BLOCO A BLOCO vem do próprio ruído da face
-      const t = alt;
-      return [_clamp255(118 + t * 58), _clamp255(112 + t * 55), _clamp255(100 + t * 50)];
-    }, { normalStrength: 3.0, cavityRadius: 3, roughBase: 0.9, roughVar: 0.1,
+    const tomBloco = carveCourses(h, pbrSize, { courses: 6, depth: 0.5, jointWidth: 0.008, seed: 11 });
+    const maps = pbrFromHeight(pbrSize, h, (alt, cav, x, y, size) => {
+      // dois níveis de variação: o tom da PEÇA e o grão DENTRO da peça
+      const peca = tomBloco[y * size + x];
+      const base = 104 + peca * 46;          // peça a peça
+      const grao = alt * 26;                 // grão interno
+      const v = base + grao;
+      return [_clamp255(v * 1.03), _clamp255(v * 0.98), _clamp255(v * 0.88)];
+    }, { normalStrength: 3.0, cavityRadius: 3, cavityGain: 14, roughBase: 0.9, roughVar: 0.1,
          aoStrength: 1.0, albedoCavity: 0.5 });
     applyPBR(M.stoneCore, maps, 1.0);
   }
