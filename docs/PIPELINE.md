@@ -194,6 +194,9 @@ o código não substitui olhar a imagem.
 | Piscina sem água | raycast na câmera do capítulo | a borda era uma **laje maciça** de 10,6 × 5,4 m cobrindo a piscina; a água ficava 9 cm abaixo |
 | Fundo da piscina plano | mesma câmera | os 6 segmentos do casco tinham o **topo sempre na mesma cota**; o desnível existia só para baixo, invisível |
 | Degraus submersos invisíveis | consequência do acima | estavam dentro do bloco maciço — geometria morta |
+| Deck atravessando a piscina | só apareceu depois de abrir a bacia | o deck era uma laje inteiriça de 15 × 8,5 m e a piscina fica **dentro** dessa pegada |
+| Deck de ipê refletindo o céu | raycast (`matAt`) — a "chapa branca" era o deck, não a água | `roughnessMap` marcado como **sRGB**: #888 vira 0,247 em linear e o Three.js multiplica → roughness 0,16 em vez de 0,66 |
+| Madeira sempre brilhante demais | medição no deck (5,45% estourado) | base do `roughnessMap` em cinza-médio **divide** a rugosidade; num mapa de rugosidade, branco = rugosidade cheia |
 | Relevo do horizonte invisível | panorâmica | os morros ficavam em y = −9 a −13 com o topo em ≈ −3: **enterrados** |
 | Mundo terminando | panorâmica | névoa 100% além de ~200 m apagava relevo e mata; ampliar o terreno não adiantava |
 | Fachada em sombra branca (255) | medição de histograma | luz do céu somada **três vezes**: IBL + hemisférica + ambiente |
