@@ -469,6 +469,20 @@ let audioSys = null;
 // e como o olho espera rebote de solo — e nao azul, que era o defeito.
 const envGroundGain = { value: 2.2 };
 let sky = null, skyNightFade = null, skyNightColor = null, skyPMREM = null, envScene = null, envGround = null, envDirty = false, lastEnvT = -99;
+// Intervalo minimo entre duas geracoes de PMREM. Ver a nota no laco de
+// render: o custo e alto e o ganho visual entre uma geracao e outra e
+// baixo, entao ele entra em orcamento em vez de rodar quando quiser.
+const PMREM_MS = 900;
+// Tiers altos usam RectAreaLight (LTC) na janela; medium/low nao. Ver a
+// nota onde as luzes de janela sao criadas.
+let usaLTC = true;
+// Quanto de rebote de interior entra no lugar da luz de janela quando o
+// LTC esta desligado. MEDIDO em medium, comparando com o high: com
+// fill = 3,0 o teto le 125,2 contra 127,5 e a parede 155,4 contra 153,5.
+// Movel e piso ficam ~25% abaixo, porque o rebote e isotropico e nao
+// reproduz o gradiente direcional do vao — e o preco conhecido da troca.
+const COMPENSA_LTC = 2.9;
+let _ultimoPMREM = -1e9;
 let waterObj = null;
 let composer = null, gradePass = null, grainPass = null, bloomPass = null, gtaoPass = null, composerFailed = false;
 let currentChapter = 0;
@@ -484,6 +498,7 @@ let modelBounds = null;
 let camCurve = null, camCurveT = 0, camCurveTarget = 0;
 let renderLoopActive = true;
 let lastFrameTime = performance.now(), frameCount = 0, currentFPS = 60, slowFrameStreak = 0;
+let _tQuadroAnterior = performance.now();
 
 const $ = id => document.getElementById(id);
 const container = $('canvas-wrap');
@@ -634,8 +649,16 @@ function createAssetSystem() {
     // Os modelos embutidos carregam primeiro e em bloco próprio: uma
     // falha ao buscar asset EXTERNO não pode derrubá-los junto. Foi
     // exatamente esse o bug encontrado renderizando.
+    // Teto de 2 s, não 10.
+    //
+    // Este await está no caminho crítico: nada da cena começa antes dele.
+    // O payload embutido é OPCIONAL — sem ele o mobiliário procedural
+    // assume, que é o caminho normal. Um cliente numa rede ruim, ou um
+    // deploy onde assets/models/ não existe, esperava DEZ SEGUNDOS de tela
+    // de carregamento por um arquivo que talvez nem devesse existir.
+    // 2 s é generoso para um arquivo local e barato quando ele não vem.
     try {
-      await Promise.race([A.loadEmbedded(), new Promise(r => setTimeout(r, 10000))]);
+      await Promise.race([A.loadEmbedded(), new Promise(r => setTimeout(r, 2000))]);
     } catch (e) { A.errors.push('embedded: ' + e.message); }
     // ------------------------------------------------------------
     // SONDA ÚNICA ANTES DE PEDIR 34 ARQUIVOS
@@ -1182,6 +1205,25 @@ function setupLighting() {
       { w: 3.2, h: 1.6, pos: [11.9, 1.8, -3.0],  alvo: [6.0, 1.5, -3.0], k: 0.5 },   // janela leste, suíte
     );
   }
+  // ------------------------------------------------------------
+  // NENHUMA RectAreaLight EM medium/low
+  // ------------------------------------------------------------
+  // RectAreaLight usa aproximação LTC: duas texturas de lookup e uma
+  // avaliação de forma analítica POR FRAGMENTO, por luz. É dos custos de
+  // shader mais altos que o Three.js oferece, e ele cai inteiro sobre o
+  // aparelho mais fraco — que é justamente o iPad do corretor e o celular
+  // do cliente, os dois em medium/low.
+  //
+  // Nos tiers altos elas ficam: é lá que a luz de janela com modelado
+  // direcional se paga, e desktop aguenta.
+  //
+  // Em medium/low quem faz o trabalho é o termo de rebote da máscara de
+  // interior, que já existe e custa três linhas de aritmética no mesmo
+  // shader que já roda. Perde-se o gradiente direcional do vão; mantém-se
+  // o comodo iluminado e quente, que é o que a imagem precisa entregar.
+  // A compensação está em LP.*.indoorFill (ver applySolarTime).
+  usaLTC = (Quality.level === 'ultra' || Quality.level === 'high');
+  if (!usaLTC) windowLights.length = 0;
   windowLights.forEach(wl => {
     const rl = new THREE.RectAreaLight(0xf2ede2, 0, wl.w, wl.h);
     rl.position.set(wl.pos[0], wl.pos[1], wl.pos[2]);
@@ -1431,7 +1473,10 @@ function applySolarTime(t) {
   // ceu que a mascara tirou; a noite ele E a luz do comodo — o rebote das
   // paredes claras sob as luminarias, que nenhuma das 8 point lights do
   // orcamento consegue fazer sozinha.
-  indoorU.fill.value = s.indoorFill;
+  // A compensacao segue a MESMA curva da luz que ela substitui: some ao
+  // anoitecer junto com a luz de janela, quando as luminarias assumem.
+  indoorU.fill.value = s.indoorFill
+    + (usaLTC ? 0 : COMPENSA_LTC * Math.max(0, 1.0 - solarTime * 1.25));
   // A piscina acende junto com a casa. Ao entardecer o sol rasante já não
   // alcança o fundo da bacia e a lâmina fecharia em preto — e piscina
   // preta no capítulo que existe para vender a piscina é o oposto do
@@ -1575,6 +1620,20 @@ function setLightMode(mode, dur) {
 }
 
 function adaptMaterialsToQuality() {
+  // ------------------------------------------------------------
+  // ALPHATEST MAIS AGRESSIVO NOS TIERS BAIXOS
+  // Cartao de folha com alphaTest e custo de PREENCHIMENTO puro: cada
+  // pixel do cartao e rasterizado e so entao descartado. Numa mata de
+  // milhares de cartoes sobrepostos, o mesmo pixel de tela e processado
+  // dezenas de vezes. Subir o limiar descarta mais cedo e corta borda de
+  // folha — que a essa distancia, e nesses aparelhos, ninguem resolve.
+  if (Quality.level === 'medium' || Quality.level === 'low') {
+    const alvo = Quality.level === 'low' ? 0.62 : 0.55;
+    ['copaArvore', 'copaArvore2', 'copaArvore3', 'arbusto', 'graminea'].forEach((k) => {
+      if (M[k] && M[k].alphaTest) { M[k].alphaTest = alvo; M[k].needsUpdate = true; }
+    });
+  }
+
   const q = Quality.get();
   if (q.glass === 'full') return;
 
@@ -6364,10 +6423,26 @@ function mergeContactShadows(root) {
   return n - 1;
 }
 
+// IDEMPOTENTE de propósito.
+//
+// A versão anterior só sabia DESLIGAR: ela pulava tudo que já estava com
+// castShadow false (`if (!o.castShadow) return`). Rodar de novo depois de
+// subir o tier — o que acontece com ?q=ultra numa sessão já iniciada, e
+// aconteceria em qualquer futuro upgrade dinâmico de qualidade — não
+// devolvia sombra a nada: o limiar de low tinha desligado 181 objetos e
+// eles ficavam desligados para sempre.
+//
+// Agora a decisão é recalculada dos dois lados, a partir do estado
+// original guardado em userData.castShadowOriginal. Rodar N vezes com o
+// mesmo tier dá o mesmo resultado; rodar com tier maior devolve o que
+// aquele tier merece.
 function optimizeShadowCasters() {
   let off = 0, kept = 0;
   houseGroup.traverse((o) => {
-    if (!o.isMesh || !o.castShadow) return;
+    if (!o.isMesh) return;
+    if (o.userData.castShadowOriginal === undefined) o.userData.castShadowOriginal = o.castShadow;
+    if (!o.userData.castShadowOriginal) return;   // nunca projetou, não passa a projetar
+    o.castShadow = true;                          // parte do original e reavalia
     if (o.isInstancedMesh) { kept++; return; }
     let base = o.userData.maxDim;
     if (base === undefined && o.geometry && o.geometry.parameters) {
@@ -7027,7 +7102,25 @@ function animate() {
 
   // Regenera o environment a partir do céu quando o sol andou o
   // suficiente. Feito fora do laço de arraste para não custar por frame.
-  if (envDirty && sky && skyPMREM) {
+  // ------------------------------------------------------------
+  // ORÇAMENTO DO PMREM
+  // Gerar o mapa de ambiente é 6 faces de cubemap mais a cadeia de
+  // convolução. Durante o ARRASTE do slider solar o sol anda continuamente,
+  // e sem freio isso dispara uma geração a cada poucos quadros — que é
+  // exatamente quando o usuário está olhando e mexendo, o pior momento
+  // possível para um engasgo.
+  //
+  // Uma geração a cada 900 ms, no máximo. Entre elas o mapa fica um pouco
+  // atrasado em relação ao céu, e isso não se vê: o que muda é a cor do
+  // preenchimento indireto, não a geometria nem o sol direto. O que se vê
+  // é o engasgo.
+  //
+  // A última geração é sempre agendada: se o arraste parar entre dois
+  // orçamentos, envDirty continua ligado e o próximo quadro elegível
+  // acerta o céu final. Sem isso o mapa poderia ficar preso no horário
+  // errado ao soltar o slider.
+  if (envDirty && sky && skyPMREM && (performance.now() - _ultimoPMREM) > PMREM_MS) {
+    _ultimoPMREM = performance.now();
     envDirty = false;
     try {
       const prev = envRT;
@@ -7119,12 +7212,37 @@ function animate() {
 
   frameCount++;
   const now = performance.now();
+  // Média móvel do tempo de quadro. Serve ao painel de debug e ao
+  // rebaixamento — os dois lendo a MESMA fonte, para não divergirem.
+  Perf.frameMs = Perf.frameMs
+    ? Perf.frameMs * 0.9 + (now - _tQuadroAnterior) * 0.1
+    : (now - _tQuadroAnterior);
+  _tQuadroAnterior = now;
+  Perf.quadros++;
+
   if (now - lastFrameTime >= 1000) {
     currentFPS = Math.round((frameCount * 1000) / (now - lastFrameTime));
     frameCount = 0; lastFrameTime = now;
-    if (currentFPS < 24) {
+    if (DEBUG && Perf.quadros > 60) {
+      console.info('[perf] ' + currentFPS + ' fps | quadro ' + Perf.frameMs.toFixed(1) + ' ms | '
+        + renderer.info.render.calls + ' draw | ' + renderer.info.programs.length + ' programas');
+    }
+    // ------------------------------------------------------------
+    // LIMIAR DE REBAIXAMENTO
+    // Era: menos de 24 fps por TRÊS segundos seguidos. Para um produto
+    // que promete fluidez, isso é nove segundos de experiência ruim
+    // antes de qualquer reação, e 24 fps já é travado o bastante para o
+    // cliente fechar a aba.
+    //
+    // Agora: menos de 45 fps por dois segundos seguidos. O alvo é 60; 45
+    // é a fronteira onde o arraste da câmera começa a arrastar de
+    // verdade. Os dois primeiros segundos ficam de fora — ali ainda há
+    // compilação de shader e upload de textura, e rebaixar por causa do
+    // boot puniria o aparelho errado.
+    const emBoot = Perf.quadros < 120;
+    if (!emBoot && currentFPS < 45) {
       slowFrameStreak++;
-      if (slowFrameStreak >= 3) {
+      if (slowFrameStreak >= 2) {
         slowFrameStreak = 0;
         if (Quality.downgrade()) applyQualityDowngrade();
       }

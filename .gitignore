@@ -10,3 +10,7 @@
 .devtest/*/
 .devtest/package-lock.json
 .devtest/index.html
+
+# intermediarios do build autocontido
+dist/_entrada.mjs
+dist/_bundle.mjs
