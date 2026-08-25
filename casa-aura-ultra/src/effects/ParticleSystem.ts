@@ -301,6 +301,11 @@ export class ParticleSystem {
     if (o && o.userData.tipo === 'passaros') this.passaros = o as THREE.Group;
   }
 
+  /** Os objetos criados, para quem monta a cena adicioná-los. */
+  get objetos(): readonly THREE.Object3D[] {
+    return this.grupos;
+  }
+
   /** Chamar por quadro com o delta em segundos. */
   atualizar(dt: number): void {
     this.tempo += dt;

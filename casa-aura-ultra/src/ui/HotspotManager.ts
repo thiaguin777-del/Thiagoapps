@@ -44,7 +44,14 @@ class Gerenciador {
   async iniciar(): Promise<void> {
     const cena = (await import('../legado/cena-bruta')) as unknown as CenaMinima;
     // A cena pode ainda não ter subido; sem ela não há o que projetar.
-    if (!cena || !cena.scene || !cena.camera) return;
+    // O retorno silencioso daqui já custou uma sessão de depuração: os
+    // marcadores simplesmente não existiam, sem erro nenhum no console.
+    // Se desistir, DIGA por quê.
+    if (!cena || !cena.scene || !cena.camera) {
+      console.warn('[hotspots] cena indisponível — scene:', !!cena?.scene,
+                   'camera:', !!cena?.camera, 'pontos:', cena?.CONFIG?.hotspots?.length);
+      return;
+    }
     this.cena = cena;
 
     this.camadaEl = document.createElement('div');

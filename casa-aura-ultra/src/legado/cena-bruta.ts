@@ -7007,6 +7007,14 @@ function animate() {
   }
   // (a ondulação da água vem do offset do normal map, logo acima)
 
+  // Gancho ANTES do render, com dt. E onde entram os modulos tipados que
+  // escrevem no que sera desenhado neste quadro: diretor de camera,
+  // uniforms de agua, feixes volumetricos, particulas, foco. Se rodassem
+  // depois do render, tudo apareceria com um quadro de atraso — visivel
+  // como tremor durante o modo cinematico.
+  const ganchosAntes = (window as any).__auraAntesDoQuadro;
+  if (ganchosAntes) { for (let i = 0; i < ganchosAntes.length; i++) ganchosAntes[i](dt); }
+
   updateReveal(dt);
   controls.update();
   clampFreeCamera();
@@ -7127,5 +7135,6 @@ window.addEventListener('unhandledrejection', (e) => {
 export { init, showFallback, Experience, Quality, Perf, CONFIG, goToChapter,
          setLightMode, applySolarTime, toggleReveal,
          scene, camera, renderer, controls, composer, M, LP,
-         solarTime, currentFPS, lampLights, houseGroup };
+         solarTime, currentFPS, lampLights, houseGroup,
+         waterObj, sunLight, currentLightMode };
 export function _cenaPronta() { return !!(scene && renderer); }
