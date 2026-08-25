@@ -1718,13 +1718,21 @@ function updateGradeForSolarTime(t) {
 // imagem externa. Dão variação visual (veios de madeira, veios de pedra)
 // sem depender de arquivos de textura.
 // ============================================================
-function makeCanvasTexture(size, draw) {
+function makeCanvasTexture(size, draw, rotulo) {
+  const t0 = performance.now();
   const c = document.createElement('canvas');
   c.width = size; c.height = size;
   const ctx = c.getContext('2d');
   draw(ctx, size);
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
+  // Toda textura procedural passa por aqui. Somando o tempo num lugar só,
+  // "o boot demora" vira "a geração de textura custa N ms de main thread",
+  // que é uma afirmação sobre a qual dá para decidir.
+  const dt = performance.now() - t0;
+  Perf.texturasMs += dt;
+  Perf.texturasN++;
+  Perf.porTextura.push([(rotulo || 'canvas') + size, +dt.toFixed(1)]);
   return tex;
 }
 
@@ -1984,6 +1992,17 @@ function _texFromData(size, data, srgb, repeat) {
 // `cor(alt, cav, x, y)` devolve [r,g,b] em 0..255 — é onde cada material
 // põe sua identidade (veio de pedra, poro de reboco, fibra de madeira).
 function pbrFromHeight(size, h, cor, opts) {
+  const _t0 = performance.now();
+  Perf.texturasN += 4;   // albedo + normal + roughness + ao
+  try {
+  return _pbrFromHeight(size, h, cor, opts);
+  } finally {
+    const dt = performance.now() - _t0;
+    Perf.texturasMs += dt;
+    Perf.porTextura.push(['pbr' + size, +dt.toFixed(1)]);
+  }
+}
+function _pbrFromHeight(size, h, cor, opts) {
   opts = opts || {};
   const forcaNormal = opts.normalStrength === undefined ? 2.0 : opts.normalStrength;
   const cav = cavityField(h, size, opts.cavityRadius || 3);
@@ -2104,7 +2123,7 @@ function woodGrainTexture(baseHex, streakHex, repeatX, repeatY, opts) {
       ctx.fillRect(0, y, s, h);
     }
     ctx.globalAlpha = 1;
-  });
+  }, 'madeira');
   // ------------------------------------------------------------
   // BUG CORRIGIDO — o deck de ipê refletia o céu como espelho
   // Localizado por raycast: a chapa branca no primeiro plano da câmera
@@ -2222,7 +2241,7 @@ function stoneVeinTexture(baseHex, veinHex, opts) {
       ctx.stroke();
     }
     ctx.globalAlpha = 1;
-  });
+  }, 'pedra');
   tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
   // repeat 1: a escala agora vem da UV em metros (applyWorldUV/TILE_M)
   tex.repeat.set(1, 1);
@@ -2241,7 +2260,7 @@ function rugPatternTexture(baseHex, accentHex) {
     ctx.globalAlpha = 0.25;
     ctx.strokeRect(28, 28, s - 56, s - 56);
     ctx.globalAlpha = 1;
-  });
+  }, 'tapete');
   return tex;
 }
 
@@ -2259,7 +2278,7 @@ function paverTexture(baseHex, jointHex, tilesPerSide) {
         ctx.fillRect(tx * cell + gap, ty * cell + gap, cell - gap * 2, cell - gap * 2);
       }
     }
-  });
+  }, 'paverTexture');
   tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
   return tex;
 }
@@ -2279,7 +2298,7 @@ function gravelTexture(baseHex) {
       ctx.fillStyle = shadeHex(baseHex, 0.75 + Math.random() * 0.5);
       ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
     }
-  });
+  }, 'gravelTexture');
   tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
   return tex;
 }
@@ -2400,7 +2419,7 @@ function barkTexture(baseHex) {
       }
     }
     ctx.globalAlpha = 1;
-  });
+  }, 'casca');
   tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
   return tex;
 }
@@ -2457,7 +2476,7 @@ function grassTexture(baseHex) {
         ctx.stroke();
       });
     }
-  });
+  }, 'grama');
   tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
   return tex;
 }
@@ -2906,7 +2925,7 @@ function roofMembraneTexture(baseHex) {
         g.addColorStop(1, 'rgba(0,0,0,0)');
         ctx.fillStyle = g;
         ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
-      });
+      }, 'manta');
     }
     // emenda do rolo: uma sombra fina e um lábio claro logo ao lado
     ctx.fillStyle = 'rgba(0,0,0,0.30)';
@@ -2935,7 +2954,7 @@ function stuccoNoiseTexture(baseHex) {
       img.data[i] += n; img.data[i + 1] += n; img.data[i + 2] += n;
     }
     ctx.putImageData(img, 0, 0);
-  });
+  }, 'estuque');
   tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
   tex.repeat.set(1, 1);
   return tex;
@@ -3431,6 +3450,23 @@ function addFixture(group, pos, color, emissiveMat, dist, importance) {
 // MEDIDO: 872 geometrias criadas, zero reutilizadas. Geometrias iguais
 // agora são criadas uma vez só e compartilhadas entre meshes.
 // ============================================================
+// ============================================================
+// PERF — numeros de boot e de quadro, sempre coletados
+// ------------------------------------------------------------
+// Regra da casa nesta base: sem numero, nao foi feito. Este objeto e o
+// lugar unico onde os numeros vivem, para o painel de debug, o arnes de
+// teste e o rebaixamento automatico de tier lerem a MESMA fonte.
+// ============================================================
+const Perf = {
+  steps: [],            // [nome, ms] por etapa de buildScene
+  bootMs: 0,            // do inicio de buildScene ate a cena pronta
+  texturasMs: 0,        // tempo gasto so gerando textura procedural
+  texturasN: 0,
+  frameMs: 0,           // media movel do tempo de quadro
+  gpuMs: null,          // preenchido se a extensao de timer existir
+  quadros: 0,
+  porTextura: [],   // [rotulo, ms] de cada geracao
+};
 const _geoCache = new Map();
 // ============================================================
 // UV EM ESCALA REAL — a correção da textura esticada
@@ -3644,19 +3680,47 @@ function getShadowTexture() {
   return _shadowTex;
 }
 let _shadowMat = null;
+// MEDIDO: o parâmetro `opacity` desta função NUNCA teve efeito nenhum, e
+// pagava caro por isso.
+//
+// Com MultiplyBlending o Three.js usa blendFuncSeparate(ZERO, SRC_COLOR,
+// ZERO, SRC_ALPHA): o RGB final é dst * src.rgb. `opacity` escala apenas
+// diffuseColor.a, que não entra nessa conta. Provado na cena, com a
+// câmera sobre uma sombra e o resto escondido:
+//
+//   todas as 27 forçadas ao mesmo material  ->  luminância idêntica
+//   opacidade 0 em todas                    ->  luminância idêntica
+//
+// Ou seja: as 14 chamadas com opacidade diferente geravam 27 CLONES de
+// material — 27 materiais, 27 draw calls e 27 variantes de programa — e
+// as 27 sombras já renderizavam todas com a mesma força. O parâmetro
+// continua na assinatura porque as chamadas o passam, mas agora está
+// documentado como inerte em vez de custar um material cada.
+//
+// (Confirmado que as sombras FUNCIONAM antes de mexer: numa cena só com
+// piso e sombras, elas escurecem o travertino de 254,3 para 200,8. O
+// primeiro teste deu "invisíveis" porque a câmera estava em cima delas e
+// o móvel ficava na frente — o raycast mostrou três hits antes.)
+//
+// Para reativar força por sombra seria preciso outra mecânica: clarear um
+// multiply exige mix(1.0, mapa, força), que multiplicação de vértice não
+// faz. Ficaria como um segundo mapa ou um shader próprio; não vale um
+// material por móvel.
 function addContactShadow(parentGroup, w, d, opacity, yOffset) {
   if (!_shadowMat) {
     _shadowMat = new THREE.MeshBasicMaterial({
-      map: getShadowTexture(), transparent: true, opacity: 0.35,
+      map: getShadowTexture(), transparent: true, opacity: 1.0,
       depthWrite: false, blending: THREE.MultiplyBlending,
     });
   }
-  const mat = (opacity !== undefined && opacity !== 0.35) ? _shadowMat.clone() : _shadowMat;
-  if (mat !== _shadowMat) mat.opacity = opacity;
-  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(w, d), mat);
+  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(w, d), _shadowMat);
   mesh.rotation.x = -Math.PI / 2;
   mesh.position.y = yOffset || 0.012;
   mesh.renderOrder = 1;
+  // Marca para o passe de fusão: multiplicação é comutativa, então estas
+  // podem ser fundidas entre si sem alterar o resultado, mesmo sendo
+  // transparentes — o que a fusão estática normal não pode assumir.
+  mesh.userData.contactShadow = true;
   parentGroup.add(mesh);
   return mesh;
 }
@@ -3963,7 +4027,7 @@ function createWallArt(w, h, toneHex) {
       img.data[i] += n; img.data[i + 1] += n; img.data[i + 2] += n;
     }
     ctx.putImageData(img, 0, 0);
-  });
+  }, 'arte');
   const canvas = new THREE.Mesh(new THREE.PlaneGeometry(w, h),
     new THREE.MeshStandardMaterial({ map: artTex, roughness: 0.96, metalness: 0, envMapIntensity: 0.12 }));
   canvas.position.z = 0.025;
@@ -6046,9 +6110,16 @@ async function buildScene(onProgress) {
   buildChaptersAndHotspots();
 
   const builtGroups = [];
+  // Custo por etapa, em milissegundos. Sem isto, "o boot está lento" não
+  // aponta para lugar nenhum: a geração procedural de textura e a
+  // construção de geometria são coisas diferentes e se otimizam de jeitos
+  // diferentes. Fica sempre ligado (é um número por etapa) e sai no
+  // console com ?debug=1.
+  Perf.steps = [];
   for (let i = 0; i < steps.length; i++) {
     const [name, fn] = steps[i];
     BuildTrace.start(name);
+    const t0 = performance.now();
     try {
       const r = fn();
       if (r && r.isObject3D) builtGroups.push([name, r]);
@@ -6056,6 +6127,7 @@ async function buildScene(onProgress) {
       BuildTrace.fail(name, e);
       throw e;
     }
+    Perf.steps.push([name, +(performance.now() - t0).toFixed(1)]);
     BuildTrace.complete(name);
     if (onProgress) onProgress((i + 1) / steps.length);
     // cede um frame entre etapas para a barra de progresso pintar de verdade
@@ -6069,6 +6141,21 @@ async function buildScene(onProgress) {
   let mergedSaved = 0;
   builtGroups.forEach(([name, grp]) => { mergedSaved += mergeStaticByMaterial(grp, name); });
   if (upperMass) mergedSaved += mergeStaticByMaterial(upperMass, 'Volume Superior');
+
+  // ------------------------------------------------------------
+  // PASSE GLOBAL — a fusão por grupo deixa dinheiro na mesa
+  // ------------------------------------------------------------
+  // mergeStaticByMaterial roda DENTRO de cada grupo. M.estuque aparece na
+  // arquitetura, na cozinha e na suíte: três grupos, três meshes, três
+  // draw calls, mesmo material. Contado na cena depois da fusão por
+  // grupo: 22 materiais com mais de um mesh e 95 meshes que poderiam
+  // desaparecer.
+  //
+  // Este passe roda sobre houseGroup inteiro. As mesmas exclusões valem —
+  // e a parada em userData.mergeRoot continua protegendo o Modo Corte,
+  // porque o percurso de mergeStaticByMaterial não entra em upperMass.
+  mergedSaved += mergeStaticByMaterial(houseGroup, 'Global entre grupos');
+  mergedSaved += mergeContactShadows(houseGroup);
   if (DEBUG) console.info('Fusão estática: -' + mergedSaved + ' draw calls no total');
 
   // Oclusão de IBL de interior — aplicada percorrendo a CENA, não o
@@ -6226,6 +6313,55 @@ function mergeStaticByMaterial(root, label) {
 
   if (DEBUG) console.info('fusão[' + label + ']: -' + saved + ' draw calls');
   return saved;
+}
+
+// ============================================================
+// FUSÃO DAS SOMBRAS DE CONTATO
+// ------------------------------------------------------------
+// A fusão estática recusa material transparente de propósito: a ordenação
+// por objeto é o que faz vidro e água aparecerem na ordem certa. Sombra de
+// contato é a exceção legítima, e por um motivo específico: o blend delas
+// é MULTIPLICAÇÃO, que é comutativa. dst*a*b dá o mesmo que dst*b*a, então
+// a ordem entre elas não existe — e todas usam o mesmo material.
+//
+// 27 planos viram 1 mesh. Não é aproximação: o resultado é idêntico.
+// ============================================================
+function mergeContactShadows(root) {
+  if (!root || !BufferGeometryUtils || !BufferGeometryUtils.mergeGeometries) return 0;
+  root.updateWorldMatrix(true, true);
+  const rootInv = new THREE.Matrix4().copy(root.matrixWorld).invert();
+  const alvos = [];
+  root.traverse((o) => { if (o.isMesh && o.userData.contactShadow) alvos.push(o); });
+  if (alvos.length < 2) return 0;
+
+  const geos = alvos.map((o) => {
+    const g = o.geometry.clone();
+    g.applyMatrix4(new THREE.Matrix4().multiplyMatrices(rootInv, o.matrixWorld));
+    for (const name of Object.keys(g.attributes)) {
+      if (name !== 'position' && name !== 'normal' && name !== 'uv') g.deleteAttribute(name);
+    }
+    if (!g.attributes.normal) g.computeVertexNormals();
+    return g;
+  });
+  let merged = null;
+  try { merged = BufferGeometryUtils.mergeGeometries(geos, false); }
+  catch (e) { if (DEBUG) console.warn('fusão de sombras de contato falhou:', e); }
+  geos.forEach((g) => g.dispose());
+  if (!merged) return 0;
+
+  const mesh = new THREE.Mesh(merged, alvos[0].material);
+  mesh.renderOrder = 1;
+  mesh.userData.merged = true;
+  mesh.userData.contactShadow = true;
+  mesh.frustumCulled = false;   // cobre a casa inteira; culling não ajuda
+  root.add(mesh);
+  const n = alvos.length;
+  alvos.forEach((o) => {
+    if (o.parent) o.parent.remove(o);
+    if (o.geometry) o.geometry.dispose();
+  });
+  if (DEBUG) console.info('sombras de contato: ' + n + ' meshes -> 1');
+  return n - 1;
 }
 
 function optimizeShadowCasters() {

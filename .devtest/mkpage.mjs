@@ -118,6 +118,7 @@ window.__AURA = {
   get wash(){ return uplightUniform },
   get indoor(){ return indoorU },
   get envGain(){ return envGroundGain },
+  get Perf(){ return Perf },
   get envGround(){ return envGround },
   get envRT(){ return envRT },
   // forca a regeneracao do PMREM: o mapa so e refeito quando o sol anda,
