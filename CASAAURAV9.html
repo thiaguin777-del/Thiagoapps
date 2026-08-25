@@ -332,7 +332,6 @@ body[data-quality="low"] #debug-panel{ }
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { Sky } from 'three/addons/objects/Sky.js';
-import { Water } from 'three/addons/objects/Water.js';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { RectAreaLightUniformsLib } from 'three/addons/lights/RectAreaLightUniformsLib.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
@@ -1235,10 +1234,10 @@ function applySolarTime(t) {
     u.mieCoefficient.value = 0.004 + solarTime * 0.010;
     u.mieDirectionalG.value = 0.80 - solarTime * 0.15;
   }
-  if (waterObj) {
-    waterObj.material.uniforms['sunDirection'].value.copy(sunDir);
-    waterObj.material.uniforms['waterColor'].value.setHex(
-      solarTime > 0.7 ? 0x0a2f3a : 0x0e4653);
+  // A água é MeshPhysicalMaterial (ver buildPoolAndDeck): escurece e
+  // esfria ao anoitecer em vez de trocar uniform de shader.
+  if (waterObj && waterObj.material && !waterObj.material.uniforms) {
+    waterObj.material.color.setHex(solarTime > 0.7 ? 0x11414f : 0x2b7f95);
   }
   // O environment é regenerado a partir do céu (não a cada frame: só
   // quando o sol andou o suficiente para valer o custo).
@@ -2119,6 +2118,16 @@ function buildMaterials() {
       normalScale: new THREE.Vector2(0.7, 0.7),
       roughness: 0.96, metalness: 0, envMapIntensity: 0.22,
     }),
+    // CAMPO DISTANTE — material separado do gramado do lote.
+    // ENCONTRADO renderizando: com uma textura só, a repetição alta
+    // necessária para ter lâmina de grama perto (2 m por ladrilho)
+    // produzia uma GRADE visível no terreno longe, por moiré de mipmap
+    // em ângulo rasante. Duas camadas resolvem: o lote fica com o
+    // gramado detalhado, e o campo além dele com ladrilho grande e sem
+    // detalhe de lâmina, que a essa distância ninguém veria mesmo.
+    campoDistante: new THREE.MeshStandardMaterial({
+      map: grassTexture('#6a8450'), roughness: 0.98, metalness: 0, envMapIntensity: 0.18,
+    }),
     troncoArvore: new THREE.MeshStandardMaterial({ map: barkTexture('#6d5945'), roughness: 0.96, metalness: 0 }),
     // COPAS — cartões recortados em alpha (ver leafCardTexture).
     // alphaTest em vez de transparent: mantém a escrita no depth buffer,
@@ -2199,14 +2208,19 @@ function buildMaterials() {
     // 3. roughness/clearcoat plausíveis para água parada de piscina,
     //    não para um espelho.
     agua: new THREE.MeshPhysicalMaterial({
-      color: 0x2e7f92,
-      roughness: 0.14, metalness: 0,
-      transparent: true, opacity: 0.72,
-      clearcoat: 0.55, clearcoatRoughness: 0.10,
-      envMapIntensity: 0.35,
+      color: 0x2b7f95,
+      roughness: 0.10, metalness: 0,
+      // opacidade baixa de propósito: o argumento de venda da piscina é
+      // ver o revestimento e o desnível do fundo ATRAVÉS da água
+      transparent: true, opacity: 0.55,
+      clearcoat: 0.7, clearcoatRoughness: 0.06,
+      // reflexo contido: em ângulo rasante um envMap forte transforma a
+      // lâmina em espelho de céu e o fundo desaparece
+      envMapIntensity: 0.22,
       normalMap: waterRippleTexture(),
-      normalScale: new THREE.Vector2(0.16, 0.16),
+      normalScale: new THREE.Vector2(0.22, 0.22),
       emissive: 0x000000, emissiveIntensity: 0,
+      side: THREE.DoubleSide,
       depthWrite: false,   // evita z-fighting com a borda molhada
     }),
   };
@@ -2217,6 +2231,10 @@ function buildMaterials() {
   M.gramado.map.repeat.set(450, 450);
   M.gramado.normalMap.repeat.set(450, 450);
   applyMacroVariation(M.gramado, 11.0, 0.16);
+  // 26 m por ladrilho no campo distante, com variação macro forte e de
+  // escala grande: o que se lê de longe é a mancha, não a lâmina.
+  M.campoDistante.map.repeat.set(35, 35);
+  applyMacroVariation(M.campoDistante, 70.0, 0.20);
   M.terraco.map.repeat.set(7, 5);
   M.caminho.map.repeat.set(2, 7);
   M.cascalho.map.repeat.set(5, 4);
@@ -2232,7 +2250,8 @@ function buildMaterials() {
   // ângulo rasante — que é exatamente como se olha um gramado.
   const aniso = (renderer && renderer.capabilities)
     ? Math.min(8, renderer.capabilities.getMaxAnisotropy()) : 1;
-  [M.gramado.map, M.gramado.normalMap, M.terraco.map, M.caminho.map, M.cascalho.map]
+  [M.gramado.map, M.gramado.normalMap, M.campoDistante.map,
+   M.terraco.map, M.caminho.map, M.cascalho.map]
     .forEach(t => { if (t) t.anisotropy = aniso; });
 
   glassMaterial = M.vidro;
@@ -4174,24 +4193,55 @@ function buildPoolAndDeck() {
     g.add(faixa);
   });
 
-  // Casco com PROFUNDIDADE REAL: fundo raso na ponta oeste descendo
-  // para fundo profundo na leste. Antes era uma caixa de altura única,
-  // que é o que fazia a água parecer um adesivo azul.
+  // ------------------------------------------------------------
+  // BUG CORRIGIDO — o casco era um BLOCO MACIÇO
+  // O comentário anterior dizia "profundidade real", mas o que o código
+  // fazia era empilhar 6 caixas cujo TOPO ficava sempre em waterY (0,02),
+  // variando só quanto elas desciam. Como o que se vê é o topo, o fundo
+  // da piscina era perfeitamente plano e o desnível não aparecia em
+  // lugar nenhum. Os degraus submersos, posicionados entre -0,11 e
+  // -0,55, ficavam DENTRO do bloco — geometria morta.
+  //
+  // Agora é uma bacia de verdade: laje de fundo em degraus descendo do
+  // raso para o fundo, e quatro paredes de casco. O desnível fica
+  // visível através da lâmina, os degraus de entrada aparecem, e a água
+  // ganha o que faz água parecer água — profundidade legível.
+  // ------------------------------------------------------------
   const shallowD = 0.85, deepD = 1.7;
   const segs = 6;
+  const wallT = 0.12;
+
+  // laje de fundo: cada trecho tem o topo na cota daquele ponto
   for (let i = 0; i < segs; i++) {
     const f = i / (segs - 1);
     const d = shallowD + (deepD - shallowD) * f;
     const segW = poolW / segs;
-    const seg = box(segW + 0.02, d, poolD, M.revestPiscina, false);
-    seg.position.set(poolCx - poolW / 2 + segW * (i + 0.5), -d / 2 + waterY, poolCz);
-    g.add(seg);
+    const laje = box(segW + 0.02, 0.12, poolD, M.revestPiscina, false);
+    laje.position.set(poolCx - poolW / 2 + segW * (i + 0.5), waterY - d - 0.06, poolCz);
+    g.add(laje);
   }
 
-  // Degraus de entrada submersos na ponta rasa
+  // paredes do casco, do fundo até logo abaixo da borda
+  const wallH = deepD + 0.12;
+  const wallY = waterY - wallH / 2 + 0.04;
+  [
+    [poolW + wallT * 2, wallT, poolCx, poolCz - poolD / 2 - wallT / 2],
+    [poolW + wallT * 2, wallT, poolCx, poolCz + poolD / 2 + wallT / 2],
+    [wallT, poolD, poolCx - poolW / 2 - wallT / 2, poolCz],
+    [wallT, poolD, poolCx + poolW / 2 + wallT / 2, poolCz],
+  ].forEach(([ww, wd, wx, wz]) => {
+    const parede = box(ww, wallH, wd, M.revestPiscina, false);
+    parede.position.set(wx, wallY, wz);
+    g.add(parede);
+  });
+
+  // Degraus de entrada na ponta rasa. Agora ficam DENTRO da bacia e
+  // aparecem através da lâmina — antes estavam enterrados no bloco.
   for (let i = 0; i < 3; i++) {
-    const st = box(2.0, 0.22, 0.42, M.bordaPiscina, false);
-    st.position.set(poolCx - poolW / 2 + 1.1, waterY - 0.13 - i * 0.22, poolCz - poolD / 2 + 0.35 + i * 0.42);
+    const st = box(2.0, 0.20, 0.44, M.bordaPiscina, false);
+    st.position.set(poolCx - poolW / 2 + 1.15,
+                    waterY - 0.12 - i * 0.20,
+                    poolCz - poolD / 2 + 0.36 + i * 0.44);
     g.add(st);
   }
 
@@ -4206,49 +4256,33 @@ function buildPoolAndDeck() {
   g.add(scupper);
 
   // ============================================================
-  // ÁGUA REAL — Water.js com reflexão planar da cena
+  // ÁGUA DA PISCINA — transparente, não espelhada
   // ------------------------------------------------------------
-  // ANTES: um box com material transparente. Por mais que eu ajustasse
-  // roughness/opacidade, continuava sendo um plano colorido — não havia
-  // nada sendo refletido, então não havia como parecer água.
+  // DECISÃO REVISTA depois de renderizar duas vezes a câmera do
+  // capítulo "Piscina". O Water.js entrega reflexão planar de verdade e
+  // é a escolha certa para lago, mar, espelho d'água — corpo de água
+  // grande, visto de longe, onde o que importa é o que ele reflete.
   //
-  // AGORA: o Water.js renderiza a cena de verdade num render target e a
-  // reflete no plano, com distorção animada por normal map. O céu, a
-  // casa e a vegetação aparecem DENTRO da água. É o que separa "plano
-  // azul" de "água".
+  // Piscina é o caso oposto. Ela é vista de perto e quase sempre em
+  // ângulo rasante, e nesse ângulo a reflexão domina por Fresnel: o que
+  // aparecia era uma chapa branca refletindo o céu claro. Pior, o
+  // Water.js não refrata o fundo — então o revestimento, o desnível do
+  // raso para o fundo e os degraus de entrada ficavam invisíveis.
   //
-  // Custo: um passe extra de render. Por isso é escalonado por tier —
-  // em aparelho fraco cai no material barato anterior.
-  const useRealWater = (Quality.level === 'ultra' || Quality.level === 'high');
-  if (useRealWater) {
-    const wNormals = waterRippleTexture();
-    wNormals.wrapS = wNormals.wrapT = THREE.RepeatWrapping;
-    const rtSize = Quality.level === 'ultra' ? 512 : 256;
-    waterObj = new Water(new THREE.PlaneGeometry(poolW, poolD), {
-      textureWidth: rtSize,
-      textureHeight: rtSize,
-      waterNormals: wNormals,
-      sunDirection: new THREE.Vector3(0, 1, 0),
-      sunColor: 0xffffff,
-      waterColor: 0x11576a,
-      distortionScale: 1.15,
-      fog: true,
-      // 0,92 deixava a lamina praticamente opaca: nao se via o fundo, e
-      // piscina em que o fundo nao aparece nao le como agua, le como
-      // superficie pintada. 0,80 mantem o reflexo do ceu e da casa e
-      // ainda deixa o degrau submerso e o rebaixamento do fundo visiveis.
-      alpha: 0.80,
-    });
-    waterObj.rotation.x = -Math.PI / 2;
-    waterObj.position.set(poolCx, waterY + 0.01, poolCz);
-    waterObj.receiveShadow = false;
-    g.add(waterObj);
-  } else {
-    const water = new THREE.Mesh(new THREE.BoxGeometry(poolW, 0.05, poolD), M.agua);
-    water.position.set(poolCx, waterY, poolCz);
-    water.receiveShadow = true;
-    g.add(water);
-  }
+  // O que faz uma piscina parecer piscina, e o que a vende, é VER O
+  // FUNDO através da água. Por isso aqui a lâmina é transparente, com
+  // reflexo de ambiente contido e ondulação por normal map animado. É a
+  // solução tecnicamente correta PARA ESTE CASO, e ainda custa um passe
+  // de render a menos que a reflexão planar.
+  // ============================================================
+  const water = new THREE.Mesh(new THREE.PlaneGeometry(poolW, poolD), M.agua);
+  water.rotation.x = -Math.PI / 2;
+  water.position.set(poolCx, waterY, poolCz);
+  water.receiveShadow = false;
+  water.renderOrder = 2;          // depois do casco, para compor por cima
+  water.userData.noMerge = true;
+  g.add(water);
+  waterObj = water;
 
   // Borda infinita na face sul
   const infinityEdge = box(poolW, 0.1, 0.26, M.bordaPiscina);
@@ -4385,9 +4419,9 @@ function farGroundMesh(size, segs) {
     pos.setZ(i, farGroundHeight(x, y + 4));
   }
   geo.computeVertexNormals();
-  const m = new THREE.Mesh(geo, M.gramado);
+  const m = new THREE.Mesh(geo, M.campoDistante);
   m.rotation.x = -Math.PI / 2;
-  m.position.set(0, -0.06, 4);
+  m.position.set(0, -0.08, 4);
   m.receiveShadow = true;
   m.userData.noMerge = true;   // malha grande, não ganha nada em fundir
   return m;
@@ -4504,6 +4538,16 @@ function buildGround() {
   // continua plano, como lote implantado realmente é, e o relevo começa
   // além dele. 96x96 segmentos = ~18 mil triângulos num único draw call.
   g.add(farGroundMesh(900, 96));
+  // Gramado do lote: disco de 130 m com a textura detalhada, por cima do
+  // campo distante. A emenda entre os dois cai onde o relevo ainda é
+  // zero, então não há degrau — e a diferença de tom é a mesma variação
+  // que o gramado já tem.
+  const lote = new THREE.Mesh(new THREE.CircleGeometry(130, 48), M.gramado);
+  lote.rotation.x = -Math.PI / 2;
+  lote.position.set(0, -0.06, 4);
+  lote.receiveShadow = true;
+  lote.userData.noMerge = true;
+  g.add(lote);
 
   // terraço sul (fachadas de vidro da ala social e da suíte) — a faixa de
   // transição em travertino que a Regra 8 pediu, entre a casa e o jardim
@@ -5444,7 +5488,7 @@ function animate() {
       if (prev && prev.dispose) prev.dispose();
     } catch (e) { if (DEBUG) console.warn('PMREM do céu falhou:', e); }
   }
-  if (waterObj) waterObj.material.uniforms['time'].value += dt * 0.6;
+  // (a ondulação da água vem do offset do normal map, logo acima)
 
   updateReveal(dt);
   controls.update();
