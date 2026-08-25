@@ -1629,6 +1629,190 @@ function makeCanvasTexture(size, draw) {
   return tex;
 }
 
+// ============================================================
+// PBR DERIVADO DE CAMPO DE ALTURA
+// ------------------------------------------------------------
+// O QUE ESTAVA ERRADO: cada mapa era DESENHADO separadamente. A cor vinha
+// de um conjunto de traços no canvas, o normal de um ruído independente,
+// a rugosidade de um cinza com listras. Três imagens que não descrevem a
+// mesma superfície — e o olho percebe: o relevo não bate com a mancha, o
+// brilho não acompanha a reentrância. É por isso que material procedural
+// costuma ler como "textura aplicada" em vez de superfície.
+//
+// Num fluxo PBR de verdade todos os mapas saem da MESMA geometria de
+// microrrelevo. Aqui é isso: um campo de altura em N oitavas, e dele
+// derivam:
+//   normal    — gradiente do campo (Sobel)
+//   AO        — cavidade, isto é, o quanto o ponto está abaixo da média
+//               da vizinhança; fundo de junta escurece, saliência não
+//   roughness — cavidade rugosa, saliência polida (é onde o pano passa)
+//   albedo    — modulado pela mesma cavidade, mais escuro no fundo
+//
+// Custo: alguns milissegundos de CPU por material no carregamento, e
+// ZERO bytes de download — que é o que importa num arquivo único.
+// ============================================================
+
+// Ruído de valor com wrap (a textura precisa ladrilhar sem costura).
+function _valueNoiseTile(size, freq, seed) {
+  const g = new Float32Array(freq * freq);
+  let x = seed * 9301 + 49297;
+  for (let i = 0; i < g.length; i++) {
+    x = (x * 9301 + 49297) % 233280;
+    g[i] = x / 233280;
+  }
+  const out = new Float32Array(size * size);
+  const step = freq / size;
+  for (let y = 0; y < size; y++) {
+    const fy = y * step, y0 = Math.floor(fy) % freq, y1 = (y0 + 1) % freq;
+    const ty = fy - Math.floor(fy), sy = ty * ty * (3 - 2 * ty);
+    for (let i = 0; i < size; i++) {
+      const fx = i * step, x0 = Math.floor(fx) % freq, x1 = (x0 + 1) % freq;
+      const tx = fx - Math.floor(fx), sx = tx * tx * (3 - 2 * tx);
+      const a = g[y0 * freq + x0], b = g[y0 * freq + x1];
+      const c = g[y1 * freq + x0], d = g[y1 * freq + x1];
+      const top = a + (b - a) * sx, bot = c + (d - c) * sx;
+      out[y * size + i] = top + (bot - top) * sy;
+    }
+  }
+  return out;
+}
+
+// Campo de altura em oitavas, normalizado em 0..1.
+function heightField(size, opts) {
+  opts = opts || {};
+  const oct = opts.octaves || 4;
+  const base = opts.baseFreq || 4;
+  const pers = opts.persistence === undefined ? 0.5 : opts.persistence;
+  const seed = opts.seed || 1;
+  const h = new Float32Array(size * size);
+  let amp = 1, norm = 0;
+  for (let o = 0; o < oct; o++) {
+    const freq = Math.max(2, Math.round(base * Math.pow(2, o)));
+    const n = _valueNoiseTile(size, freq, seed + o * 17);
+    for (let i = 0; i < h.length; i++) h[i] += n[i] * amp;
+    norm += amp;
+    amp *= pers;
+  }
+  let mn = Infinity, mx = -Infinity;
+  for (let i = 0; i < h.length; i++) { h[i] /= norm; if (h[i] < mn) mn = h[i]; if (h[i] > mx) mx = h[i]; }
+  const inv = 1 / Math.max(1e-6, mx - mn);
+  for (let i = 0; i < h.length; i++) h[i] = (h[i] - mn) * inv;
+  return h;
+}
+
+// Cavidade: quanto o ponto está ABAIXO da média da vizinhança.
+// Positivo = reentrância (escurece e enrugece), negativo = saliência.
+function cavityField(h, size, raio) {
+  const r = raio || 3;
+  const blur = new Float32Array(size * size);
+  const tmp = new Float32Array(size * size);
+  const n = 2 * r + 1;
+  for (let y = 0; y < size; y++) {           // horizontal
+    for (let x = 0; x < size; x++) {
+      let acc = 0;
+      for (let k = -r; k <= r; k++) acc += h[y * size + ((x + k + size) % size)];
+      tmp[y * size + x] = acc / n;
+    }
+  }
+  for (let x = 0; x < size; x++) {           // vertical
+    for (let y = 0; y < size; y++) {
+      let acc = 0;
+      for (let k = -r; k <= r; k++) acc += tmp[((y + k + size) % size) * size + x];
+      blur[y * size + x] = acc / n;
+    }
+  }
+  const cav = new Float32Array(size * size);
+  for (let i = 0; i < cav.length; i++) cav[i] = blur[i] - h[i];
+  return cav;
+}
+
+function _texFromData(size, data, srgb, repeat) {
+  const c = document.createElement('canvas');
+  c.width = size; c.height = size;
+  const ctx = c.getContext('2d');
+  const img = ctx.createImageData(size, size);
+  img.data.set(data);
+  ctx.putImageData(img, 0, 0);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace;
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  if (repeat) t.repeat.set(repeat, repeat);
+  return t;
+}
+
+// Monta o conjunto PBR completo a partir de um campo de altura.
+// `cor(alt, cav, x, y)` devolve [r,g,b] em 0..255 — é onde cada material
+// põe sua identidade (veio de pedra, poro de reboco, fibra de madeira).
+function pbrFromHeight(size, h, cor, opts) {
+  opts = opts || {};
+  const forcaNormal = opts.normalStrength === undefined ? 2.0 : opts.normalStrength;
+  const cav = cavityField(h, size, opts.cavityRadius || 3);
+  let cmax = 1e-6;
+  for (let i = 0; i < cav.length; i++) cmax = Math.max(cmax, Math.abs(cav[i]));
+
+  const alb = new Uint8ClampedArray(size * size * 4);
+  const nrm = new Uint8ClampedArray(size * size * 4);
+  const rgh = new Uint8ClampedArray(size * size * 4);
+  const aoo = new Uint8ClampedArray(size * size * 4);
+
+  const rBase = opts.roughBase === undefined ? 0.82 : opts.roughBase;
+  const rVar = opts.roughVar === undefined ? 0.28 : opts.roughVar;
+  const aoForca = opts.aoStrength === undefined ? 0.75 : opts.aoStrength;
+  const albCav = opts.albedoCavity === undefined ? 0.30 : opts.albedoCavity;
+
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const i = y * size + x, j = i * 4;
+      const cv = cav[i] / cmax;                    // -1..1
+      const cvPos = Math.max(0, cv);               // só reentrância
+
+      const rgb = cor(h[i], cv, x, y, size);
+      const k = 1 - cvPos * albCav;                // fundo de junta escurece
+      alb[j] = rgb[0] * k; alb[j+1] = rgb[1] * k; alb[j+2] = rgb[2] * k; alb[j+3] = 255;
+
+      // normal por Sobel no campo de altura
+      const l = h[y * size + ((x - 1 + size) % size)];
+      const r = h[y * size + ((x + 1) % size)];
+      const u = h[((y - 1 + size) % size) * size + x];
+      const d = h[((y + 1) % size) * size + x];
+      let nx = (l - r) * forcaNormal, ny = (u - d) * forcaNormal;
+      const len = Math.hypot(nx, ny, 1);
+      nrm[j] = ((nx / len) * 0.5 + 0.5) * 255;
+      nrm[j+1] = ((ny / len) * 0.5 + 0.5) * 255;
+      nrm[j+2] = ((1 / len) * 0.5 + 0.5) * 255;
+      nrm[j+3] = 255;
+
+      // rugosidade: reentrância áspera, saliência polida (onde o pano passa)
+      const rough = Math.min(1, Math.max(0, rBase + cv * rVar));
+      rgh[j] = rgh[j+1] = rgh[j+2] = rough * 255; rgh[j+3] = 255;
+
+      // AO de cavidade
+      const ao = 1 - cvPos * aoForca;
+      aoo[j] = aoo[j+1] = aoo[j+2] = ao * 255; aoo[j+3] = 255;
+    }
+  }
+  return {
+    map: _texFromData(size, alb, true, opts.repeat),
+    normalMap: _texFromData(size, nrm, false, opts.repeat),
+    roughnessMap: _texFromData(size, rgh, false, opts.repeat),
+    aoMap: _texFromData(size, aoo, false, opts.repeat),
+  };
+}
+
+// Aplica um conjunto PBR num material, preservando a intenção autoral do
+// normalScale e mantendo `roughness` em 1 (quem manda passa a ser o mapa,
+// que já traz o valor absoluto — multiplicar de novo achataria tudo).
+function applyPBR(material, maps, normalScale) {
+  material.map = maps.map;
+  material.normalMap = maps.normalMap;
+  material.normalScale = new THREE.Vector2(normalScale, normalScale);
+  material.roughnessMap = maps.roughnessMap;
+  material.aoMap = maps.aoMap;
+  material.roughness = 1.0;
+  material.needsUpdate = true;
+  return material;
+}
+
 function woodGrainTexture(baseHex, streakHex, repeatX, repeatY, opts) {
   opts = opts || {};
   const size = opts.highRes ? 512 : 256;
@@ -2482,6 +2666,66 @@ function buildMaterials() {
   // iguais. Mesma correcao aplicada a grama: ruido de escala grande em
   // espaco de mundo, incomensuravel com o periodo do ladrilho.
   applyMacroVariation(M.stoneCore, 4.5, 0.13);
+  // ------------------------------------------------------------
+  // PBR DERIVADO PARA A ARQUITETURA
+  // Estes quatro materiais cobrem quase toda a área de tela do projeto —
+  // piso, paredes, lajes e o núcleo de pedra. Passam a ter cor, relevo,
+  // rugosidade e oclusão saindo do MESMO campo de altura, em vez de três
+  // desenhos independentes que não descrevem a mesma superfície.
+  // ------------------------------------------------------------
+  const pbrSize = (Quality.level === 'low' || Quality.level === 'medium') ? 256 : 512;
+  const _clamp255 = (v) => v < 0 ? 0 : v > 255 ? 255 : v;
+
+  // TRAVERTINO — piso e terraços. Veio de leito horizontal e poros.
+  {
+    const h = heightField(pbrSize, { octaves: 5, baseFreq: 3, persistence: 0.55, seed: 7 });
+    const maps = pbrFromHeight(pbrSize, h, (alt, cav, x, y, size) => {
+      // bandas horizontais suaves = leito sedimentar do travertino
+      const leito = Math.sin((y / size) * Math.PI * 6 + alt * 2.4) * 0.5 + 0.5;
+      const t = alt * 0.55 + leito * 0.45;
+      return [_clamp255(214 + t * 32), _clamp255(203 + t * 30), _clamp255(184 + t * 28)];
+    }, { normalStrength: 2.4, cavityRadius: 3, roughBase: 0.46, roughVar: 0.34,
+         aoStrength: 0.85, albedoCavity: 0.34 });
+    applyPBR(M.travertino, maps, 0.85);
+    M.travertino.envMapIntensity = 0.35;
+  }
+
+  // ESTUQUE — reboco fino. Poro pequeno e denso, sem direção.
+  {
+    const h = heightField(pbrSize, { octaves: 5, baseFreq: 10, persistence: 0.62, seed: 19 });
+    const maps = pbrFromHeight(pbrSize, h, (alt) => {
+      const t = alt;
+      return [_clamp255(228 + t * 22), _clamp255(222 + t * 22), _clamp255(210 + t * 22)];
+    }, { normalStrength: 1.5, cavityRadius: 2, roughBase: 0.88, roughVar: 0.16,
+         aoStrength: 0.55, albedoCavity: 0.22 });
+    applyPBR(M.estuque, maps, 0.6);
+  }
+
+  // CONCRETO — laje aparente. Mancha larga e poros de fôrma.
+  {
+    const h = heightField(pbrSize, { octaves: 5, baseFreq: 5, persistence: 0.5, seed: 31 });
+    const maps = pbrFromHeight(pbrSize, h, (alt, cav) => {
+      const t = alt * 0.8 + 0.1;
+      const v = 176 + t * 34 - Math.max(0, cav) * 26;
+      return [_clamp255(v), _clamp255(v * 0.995), _clamp255(v * 0.975)];
+    }, { normalStrength: 1.8, cavityRadius: 3, roughBase: 0.86, roughVar: 0.2,
+         aoStrength: 0.7, albedoCavity: 0.28 });
+    applyPBR(M.concreto, maps, 0.5);
+    M.concreto.color.setHex(0xffffff);   // a cor passa a vir do mapa
+  }
+
+  // NÚCLEO EM PEDRA — elemento herói. Leito marcado e relevo forte.
+  {
+    const h = heightField(pbrSize, { octaves: 5, baseFreq: 4, persistence: 0.58, seed: 53 });
+    const maps = pbrFromHeight(pbrSize, h, (alt, cav, x, y, size) => {
+      const leito = Math.sin((y / size) * Math.PI * 9 + alt * 3.0) * 0.5 + 0.5;
+      const t = alt * 0.5 + leito * 0.5;
+      return [_clamp255(132 + t * 42), _clamp255(124 + t * 40), _clamp255(110 + t * 36)];
+    }, { normalStrength: 3.2, cavityRadius: 4, roughBase: 0.88, roughVar: 0.14,
+         aoStrength: 0.95, albedoCavity: 0.42 });
+    applyPBR(M.stoneCore, maps, 1.15);
+  }
+
   applyMacroVariation(M.estuque, 6.0, 0.055);
 
   // Balizadores de fachada. Posições escolhidas onde existe PAREDE OPACA
@@ -2506,8 +2750,14 @@ function buildMaterials() {
   // ângulo rasante — que é exatamente como se olha um gramado.
   const aniso = (renderer && renderer.capabilities)
     ? Math.min(8, renderer.capabilities.getMaxAnisotropy()) : 1;
+  // Inclui os mapas PBR derivados: eles substituíram os objetos de
+  // textura originais, então precisam receber anisotropia também.
   [M.gramado.map, M.gramado.normalMap, M.campoDistante.map,
-   M.terraco.map, M.caminho.map, M.cascalho.map]
+   M.terraco.map, M.caminho.map, M.cascalho.map,
+   M.travertino.map, M.travertino.normalMap, M.travertino.roughnessMap, M.travertino.aoMap,
+   M.estuque.map, M.estuque.normalMap, M.estuque.roughnessMap, M.estuque.aoMap,
+   M.concreto.map, M.concreto.normalMap, M.concreto.roughnessMap, M.concreto.aoMap,
+   M.stoneCore.map, M.stoneCore.normalMap, M.stoneCore.roughnessMap, M.stoneCore.aoMap]
     .forEach(t => { if (t) t.anisotropy = aniso; });
 
   glassMaterial = M.vidro;
