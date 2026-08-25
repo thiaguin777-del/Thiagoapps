@@ -42,8 +42,28 @@ const out = await page.evaluate(() => {
     meshesFundidos: merged,
     trianglesCena: Math.round(tris),
     render: s,
+    selftest: A.selftest(),
   };
 });
+
+// Sonda de material: pontos suspeitos na captura da chegada.
+const matSonda = await page.evaluate(() => {
+  const A = window.__AURA;
+  A.shot([14.8, 3.0, -13], [9.5, 1.7, -6.5]);
+  const pts = {
+    'parede-esq':      [-0.62,  0.10],
+    'parede-ondulada': [-0.30, -0.05],
+    'parede-dir':      [ 0.40,  0.05],
+    'piso-entrada':    [-0.05, -0.55],
+    'nucleo-pedra':    [ 0.55,  0.62],
+    'porta':           [ 0.02, -0.10],
+  };
+  const out = {};
+  for (const k in pts) out[k] = A.matAt(pts[k][0], pts[k][1]);
+  out.passes = A.composer ? A.composer.passes.map(p => p.constructor.name) : null;
+  return out;
+});
+console.log('SONDA DE MATERIAL', JSON.stringify(matSonda, null, 1));
 
 // Uma imagem só, para medir exposição/cor sem pagar a bateria inteira.
 if (process.env.AURA_SHOT) {

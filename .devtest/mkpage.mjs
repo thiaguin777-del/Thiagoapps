@@ -74,7 +74,73 @@ window.__AURA = {
     lastEnvT = -99;
     applySolarTime(0);
   },
-  LP,
+  LP, M,
+  // Identifica QUAL material está sob um ponto da tela (coordenada
+  // normalizada -1..1). Serve para não diagnosticar artefato por
+  // impressão: aponta-se para o defeito e o raycast diz o material.
+  matAt(nx, ny){
+    const rc = new THREE.Raycaster();
+    rc.setFromCamera(new THREE.Vector2(nx, ny), camera);
+    const hits = rc.intersectObject(scene, true);
+    for (const h of hits) {
+      const o = h.object;
+      if (!o.isMesh || !o.material || o.material.visible === false) continue;
+      let nome = '?';
+      for (const k in M) if (M[k] === o.material) nome = k;
+      return {
+        material: nome,
+        temMap: !!o.material.map,
+        temNormal: !!o.material.normalMap,
+        repeat: o.material.map ? [o.material.map.repeat.x, o.material.map.repeat.y] : null,
+        fundido: !!o.object3D || !!o.userData.merged,
+        dist: +h.distance.toFixed(2),
+        uv: h.uv ? [+h.uv.x.toFixed(2), +h.uv.y.toFixed(2)] : null,
+      };
+    }
+    return null;
+  },
+  // Teste estrutural: a fusão de geometria remove centenas de objetos da
+  // cena, então é preciso PROVAR que o que sumiu foi só duplicação de
+  // draw call e não conteúdo. Verifica volume ocupado, o Modo Corte, a
+  // água e as luminárias.
+  selftest(){
+    const bbox = (o) => {
+      const b = new THREE.Box3().setFromObject(o);
+      if (!isFinite(b.min.x)) return null;
+      const s = b.getSize(new THREE.Vector3());
+      return { x: +s.x.toFixed(2), y: +s.y.toFixed(2), z: +s.z.toFixed(2) };
+    };
+    const r = { grupos: {}, falhas: [] };
+    houseGroup.children.forEach((c, i) => {
+      const b = bbox(c);
+      if (!b) { r.falhas.push('grupo ' + i + ' sem volume'); return; }
+      r.grupos['g' + i] = b;
+    });
+
+    // Modo Corte: o volume superior tem de continuar existindo e subindo
+    r.upperMass = upperMass ? { filhos: upperMass.children.length, bbox: bbox(upperMass) } : null;
+    if (!upperMass || upperMass.children.length === 0) r.falhas.push('upperMass vazio — Modo Corte quebrado');
+    const y0 = upperMass ? upperMass.position.y : null;
+    toggleReveal(true);
+    for (let i = 0; i < 200; i++) updateReveal(0.05);
+    r.revealSobeAte = upperMass ? +upperMass.position.y.toFixed(2) : null;
+    if (upperMass && upperMass.position.y < 6) r.falhas.push('Modo Corte não ergue o volume');
+    toggleReveal(false);
+    for (let i = 0; i < 200; i++) updateReveal(0.05);
+    r.revealVolta = upperMass ? +upperMass.position.y.toFixed(2) : null;
+
+    // Água: o Water.js não pode ter sido fundido
+    r.agua = waterObj ? { existe: true, temUniforms: !!(waterObj.material && waterObj.material.uniforms) } : { existe: false };
+    if (waterObj && !waterObj.material.uniforms) r.falhas.push('Water.js perdeu uniforms');
+
+    r.luzesReais = lampLights.length;
+    r.emissivas = emissiveFixtures.length;
+    if (emissiveFixtures.length === 0) r.falhas.push('nenhum material emissivo registrado');
+
+    // Hotspots continuam clicáveis
+    r.hotspots = hotspotMeshes.length;
+    return r;
+  },
   // renderer.info zera a cada render; lido depois do composer ele conta
   // só o quad final. Para medir a cena de verdade, renderiza direto.
   stats(){

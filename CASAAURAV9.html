@@ -462,7 +462,7 @@ let envRT = null;
 let rectLights = [];
 let Assets = null;
 let audioSys = null;
-let sky = null, skyPMREM = null, envDirty = false, lastEnvT = -99;
+let sky = null, skyPMREM = null, envScene = null, envGround = null, envDirty = false, lastEnvT = -99;
 let waterObj = null;
 let composer = null, gradePass = null, grainPass = null, bloomPass = null, gtaoPass = null, composerFailed = false;
 let currentChapter = 0;
@@ -850,6 +850,16 @@ async function init() {
   skyPMREM = new THREE.PMREMGenerator(renderer);
   skyPMREM.compileEquirectangularShader();
 
+  // Cena auxiliar usada SÓ para gerar o mapa de ambiente: céu + calota de
+  // solo. A calota é uma meia-esfera virada para dentro, com material
+  // básico (não recebe luz — ela É a luz que o solo devolve).
+  envScene = new THREE.Scene();
+  envGround = new THREE.Mesh(
+    new THREE.SphereGeometry(4000, 16, 8, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2),
+    new THREE.MeshBasicMaterial({ color: 0x8a7f6a, side: THREE.BackSide, fog: false })
+  );
+  envScene.add(envGround);
+
   const q = Quality.get();
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, q.pixelRatio));
@@ -1063,10 +1073,10 @@ function setupLighting() {
 // do dia. Sem isso o céu noturno continuava iluminando a casa como se
 // fosse meio-dia, porque envMapIntensity é constante por material.
 const LP = {
-  day:    { bg: 0x87CEEB, fog: 0x9fd4ea, fogD: 0.01155, sunC: 0xfff5e6, sunI: 2.9, hemiSky: 0xcfe2f2, hemiGnd: 0xa8906c, hemiI: 0.50, amb: 0.05, exp: 0.95, envI: 0.62, pool: 0.0,  lamp: 0.0,  glassGlow: 0.00, waterGlow: 0.00 },
-  golden: { bg: 0xE8A971, fog: 0xefb98a, fogD: 0.01350, sunC: 0xffb066, sunI: 2.6, hemiSky: 0xffcc88, hemiGnd: 0x9c7550, hemiI: 0.44, amb: 0.05, exp: 0.94, envI: 0.50, pool: 0.6,  lamp: 0.6,  glassGlow: 0.06, waterGlow: 0.05 },
-  blue:   { bg: 0x24406b, fog: 0x2c4a72, fogD: 0.007,   sunC: 0x7fa0d8, sunI: 0.5, hemiSky: 0x4a72b0, hemiGnd: 0x3a3830, hemiI: 0.34, amb: 0.06, exp: 0.86, envI: 0.26, pool: 1.1,  lamp: 1.0,  glassGlow: 0.20, waterGlow: 0.15 },
-  night:  { bg: 0x0a0e1a, fog: 0x0c0f1c, fogD: 0.009,   sunC: 0x33446a, sunI: 0.10, hemiSky: 0x1c2436, hemiGnd: 0x14120e, hemiI: 0.20, amb: 0.05, exp: 0.72, envI: 0.10, pool: 1.7,  lamp: 1.6,  glassGlow: 0.32, waterGlow: 0.22 },
+  day:    { bg: 0x87CEEB, fog: 0x9fd4ea, fogD: 0.01155, sunC: 0xfff5e6, sunI: 2.40, hemiSky: 0xcfe2f2, hemiGnd: 0xa8906c, hemiI: 0.30, amb: 0.05, exp: 0.85, envI: 0.45, pool: 0.0,  lamp: 0.0,  glassGlow: 0.00, waterGlow: 0.00 },
+  golden: { bg: 0xE8A971, fog: 0xefb98a, fogD: 0.01350, sunC: 0xffb066, sunI: 2.20, hemiSky: 0xffcc88, hemiGnd: 0x9c7550, hemiI: 0.28, amb: 0.05, exp: 0.86, envI: 0.36, pool: 0.6,  lamp: 0.6,  glassGlow: 0.06, waterGlow: 0.05 },
+  blue:   { bg: 0x24406b, fog: 0x2c4a72, fogD: 0.007,   sunC: 0x7fa0d8, sunI: 0.45, hemiSky: 0x4a72b0, hemiGnd: 0x3a3830, hemiI: 0.22, amb: 0.06, exp: 0.82, envI: 0.20, pool: 1.1,  lamp: 1.0,  glassGlow: 0.20, waterGlow: 0.15 },
+  night:  { bg: 0x0a0e1a, fog: 0x0c0f1c, fogD: 0.009,   sunC: 0x33446a, sunI: 0.09, hemiSky: 0x1c2436, hemiGnd: 0x14120e, hemiI: 0.14, amb: 0.05, exp: 0.72, envI: 0.08, pool: 1.7,  lamp: 1.6,  glassGlow: 0.32, waterGlow: 0.22 },
 };
 
 // ============================================================
@@ -1552,27 +1562,59 @@ function woodRoughnessMap(repeatX, repeatY, highRes) {
 
 function stoneVeinTexture(baseHex, veinHex, opts) {
   opts = opts || {};
-  const tex = makeCanvasTexture(opts.highRes ? 512 : 256, (ctx, s) => {
+  // REESCRITA. A versão anterior desenhava 5 veios grossos e 12 finos
+  // percorrendo o ladrilho de cima a baixo com deslocamento lateral de
+  // até 50 px por passo. Com a UV em escala real (um ladrilho = 1,6 m),
+  // isso aparecia como meia dúzia de fios verticais errantes atravessando
+  // a fachada inteira — foi o artefato localizado por raycast no portal
+  // de entrada. Pedra real não tem isso: tem grão fino, manchas de tom e
+  // veios com direção de LEITO, predominantemente horizontal.
+  const S = opts.highRes ? 512 : 256;
+  const tex = makeCanvasTexture(S, (ctx, s) => {
     ctx.fillStyle = baseHex;
     ctx.fillRect(0, 0, s, s);
-    ctx.strokeStyle = veinHex;
-    // duas escalas de veio: pedra real tem veio grosso e uma trama fina
-    ctx.globalAlpha = 0.14;
-    for (let i = 0; i < 5; i++) {
-      ctx.lineWidth = 0.8 + Math.random() * 2.2;
-      ctx.beginPath();
-      let x = Math.random() * s, y = 0;
-      ctx.moveTo(x, y);
-      while (y < s) { x += (Math.random() - 0.5) * 50; y += 18 + Math.random() * 28; ctx.lineTo(x, y); }
-      ctx.stroke();
+
+    // 1. manchas largas de tom — a variação que se enxerga de longe
+    for (let i = 0; i < 34; i++) {
+      const r = s * (0.08 + Math.random() * 0.26);
+      const g = ctx.createRadialGradient(
+        Math.random() * s, Math.random() * s, 0,
+        Math.random() * s, Math.random() * s, r);
+      g.addColorStop(0, shadeHex(Math.random() < 0.5 ? baseHex : veinHex, 0.86 + Math.random() * 0.3));
+      g.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.globalAlpha = 0.16;
+      ctx.fillStyle = g;
+      ctx.fillRect(0, 0, s, s);
     }
-    ctx.globalAlpha = 0.08;
-    for (let i = 0; i < 12; i++) {
-      ctx.lineWidth = 0.3 + Math.random() * 0.7;
+    ctx.globalAlpha = 1;
+
+    // 2. grão fino — o que dá leitura de pedra de perto
+    const img = ctx.getImageData(0, 0, s, s);
+    for (let i = 0; i < img.data.length; i += 4) {
+      const n = (Math.random() - 0.5) * 16;
+      img.data[i] += n; img.data[i + 1] += n; img.data[i + 2] += n;
+    }
+    ctx.putImageData(img, 0, 0);
+
+    // 3. veios com direção de leito: quase horizontais, muitos e sutis,
+    // com jitter pequeno. É o oposto do "fio errante" anterior.
+    const veios = opts.veins === undefined ? 26 : opts.veins;
+    const inclina = opts.bedding === undefined ? 0.16 : opts.bedding;
+    ctx.lineCap = 'round';
+    for (let i = 0; i < veios; i++) {
+      const grosso = Math.random() < 0.28;
+      ctx.globalAlpha = grosso ? 0.13 : 0.07;
+      ctx.strokeStyle = veinHex;
+      ctx.lineWidth = grosso ? (1.2 + Math.random() * 2.0) * (S / 256) : (0.4 + Math.random() * 0.7) * (S / 256);
+      let y = Math.random() * s;
+      let x = -s * 0.05;
       ctx.beginPath();
-      let x = Math.random() * s, y = 0;
       ctx.moveTo(x, y);
-      while (y < s) { x += (Math.random() - 0.5) * 25; y += 10 + Math.random() * 16; ctx.lineTo(x, y); }
+      while (x < s * 1.05) {
+        x += s * (0.06 + Math.random() * 0.10);
+        y += (Math.random() - 0.5) * s * inclina;
+        ctx.lineTo(x, y);
+      }
       ctx.stroke();
     }
     ctx.globalAlpha = 1;
@@ -1978,7 +2020,13 @@ function buildMaterials() {
       normalMap: (() => { const t = noiseNormalTexture(16, 1.1); t.repeat.set(1, 1); return t; })(),
       normalScale: new THREE.Vector2(0.3, 0.3),
       roughness: 0.9, metalness: 0 }),
-    stoneCore:    new THREE.MeshStandardMaterial({ map: stoneVeinTexture('#8f8579', '#655c50'), roughness: 0.8, metalness: 0 }),
+    // Núcleo em pedra: elemento herói do projeto. Leito bem marcado e
+    // relevo, para ler como pedra assentada e não como parede pintada.
+    stoneCore:    new THREE.MeshStandardMaterial({
+      map: stoneVeinTexture('#8f8579', '#5e5548', { highRes: true, veins: 40, bedding: 0.10 }),
+      normalMap: (() => { const t = noiseNormalTexture(12, 1.6); t.repeat.set(1, 1); return t; })(),
+      normalScale: new THREE.Vector2(0.55, 0.55),
+      roughness: 0.86, metalness: 0 }),
     concreto:     new THREE.MeshStandardMaterial({
       color: 0xc4c2be,
       normalMap: (() => { const t = noiseNormalTexture(10, 0.8); t.repeat.set(1, 1); return t; })(),
@@ -2001,8 +2049,15 @@ function buildMaterials() {
       map: woodGrainTexture('#d8bb92', '#a3835c', 1, 1), roughness: 0.55, metalness: 0.02,
       emissive: 0x2a2018, emissiveIntensity: 0.35,
     }),
-    travertino:   new THREE.MeshStandardMaterial({ map: stoneVeinTexture('#e2d8c9', '#c7b89f', { highRes: true }), roughness: 0.40, metalness: 0 }),
-    bancada:      new THREE.MeshStandardMaterial({ map: stoneVeinTexture('#f2efe9', '#d8d0c2', { highRes: true }), roughness: 0.18, metalness: 0.05, envMapIntensity: 0.55 }),
+    travertino:   new THREE.MeshStandardMaterial({
+      map: stoneVeinTexture('#e2d8c9', '#c7b89f', { highRes: true, veins: 30, bedding: 0.07 }),
+      normalMap: (() => { const t = noiseNormalTexture(14, 0.7); t.repeat.set(1, 1); return t; })(),
+      normalScale: new THREE.Vector2(0.2, 0.2),
+      roughness: 0.42, metalness: 0 }),
+    // Bancada em pedra polida: veio longo e sutil, superfície lisa.
+    bancada:      new THREE.MeshStandardMaterial({
+      map: stoneVeinTexture('#f2efe9', '#cfc6b6', { highRes: true, veins: 14, bedding: 0.26 }),
+      roughness: 0.16, metalness: 0.05, envMapIntensity: 0.55 }),
     portaEscura:  new THREE.MeshStandardMaterial({ color: 0x4a3426, roughness: 0.5, metalness: 0.02 }),
     metal:        new THREE.MeshStandardMaterial({ color: 0x1c1a18, roughness: 0.35, metalness: 0.85 }),
     latao:        new THREE.MeshStandardMaterial({ color: 0xb08d57, roughness: 0.3, metalness: 0.9 }),
@@ -2058,8 +2113,12 @@ function buildMaterials() {
       map: grassBladeCardTexture('#8a9a55'), alphaTest: 0.35, side: THREE.DoubleSide,
       roughness: 0.98, metalness: 0, envMapIntensity: 0.25,
     }),
-    bordaPiscina: new THREE.MeshStandardMaterial({ map: stoneVeinTexture('#e0dcd4', '#c9c2b4'), roughness: 0.7, metalness: 0 }),
-    revestPiscina:new THREE.MeshStandardMaterial({ color: 0x1d4f5c, roughness: 0.35, metalness: 0, envMapIntensity: 0.4 }),
+    bordaPiscina: new THREE.MeshStandardMaterial({
+      map: stoneVeinTexture('#e0dcd4', '#c9c2b4', { highRes: true, veins: 24, bedding: 0.06 }),
+      normalMap: (() => { const t = noiseNormalTexture(14, 0.8); t.repeat.set(1, 1); return t; })(),
+      normalScale: new THREE.Vector2(0.24, 0.24),
+      roughness: 0.72, metalness: 0 }),
+    revestPiscina:new THREE.MeshStandardMaterial({ color: 0x2e7387, roughness: 0.32, metalness: 0, envMapIntensity: 0.4 }),
     vaso:         new THREE.MeshStandardMaterial({ color: 0xd8d2c6, roughness: 0.8, metalness: 0 }),
     terraco:      new THREE.MeshStandardMaterial({ map: paverTexture('#ded2bd', '#a99a83', 4), roughness: 0.5, metalness: 0 }),
     caminho:      new THREE.MeshStandardMaterial({ map: paverTexture('#c9beac', '#8f8272', 2), roughness: 0.6, metalness: 0 }),
@@ -4028,10 +4087,14 @@ function buildPoolAndDeck() {
       waterNormals: wNormals,
       sunDirection: new THREE.Vector3(0, 1, 0),
       sunColor: 0xffffff,
-      waterColor: 0x0e4653,
-      distortionScale: 1.4,
+      waterColor: 0x11576a,
+      distortionScale: 1.15,
       fog: true,
-      alpha: 0.92,
+      // 0,92 deixava a lamina praticamente opaca: nao se via o fundo, e
+      // piscina em que o fundo nao aparece nao le como agua, le como
+      // superficie pintada. 0,80 mantem o reflexo do ceu e da casa e
+      // ainda deixa o degrau submerso e o rebaixamento do fundo visiveis.
+      alpha: 0.80,
     });
     waterObj.rotation.x = -Math.PI / 2;
     waterObj.position.set(poolCx, waterY + 0.01, poolCz);
@@ -5167,7 +5230,27 @@ function animate() {
       const mieC = u.mieCoefficient.value, mieG = u.mieDirectionalG.value;
       u.mieCoefficient.value = 0.0005;
       u.mieDirectionalG.value = 0.0;
-      envRT = skyPMREM.fromScene(sky);
+
+      // ------------------------------------------------------------
+      // O CHÃO DENTRO DO MAPA DE AMBIENTE
+      // Segundo defeito da mesma família: fromScene(sky) só via o CÉU.
+      // Metade de baixo do mapa de ambiente ficava com o azul escuro da
+      // abóbada abaixo do horizonte, ou seja, o IBL não tinha nenhum
+      // rebote de solo. Uma parede vertical integrava um hemisfério
+      // inteiramente azul — e por isso toda superfície em sombra saía
+      // fria, por mais que se mexesse na hemisférica.
+      //
+      // No mundo real é o gramado e o travertino que devolvem luz quente
+      // para as sombras. Aqui isso vira uma calota abaixo do horizonte,
+      // com a cor de solo da parada atmosférica atual, incluída só na
+      // geração do mapa — não aparece na cena.
+      // ------------------------------------------------------------
+      const skyParent = sky.parent;
+      envScene.add(sky);
+      envGround.material.color.copy(solarStateAt(solarTime).hemiGnd);
+      envRT = skyPMREM.fromScene(envScene);
+      if (skyParent) skyParent.add(sky);
+
       u.mieCoefficient.value = mieC;
       u.mieDirectionalG.value = mieG;
       scene.environment = envRT.texture;
