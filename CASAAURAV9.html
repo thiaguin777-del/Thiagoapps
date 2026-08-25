@@ -1683,6 +1683,34 @@ function makeCanvasTexture(size, draw) {
   return tex;
 }
 
+// ------------------------------------------------------------
+// DESENHO QUE ATRAVESSA A BORDA DO LADRILHO
+//
+// ACHADO RENDERIZANDO o gramado em ângulo rasante: o terreno inteiro era
+// uma grade regular de quadrados. Não era filtragem — anisotropia 8 de um
+// máximo de 16, mipmap linear. Era o desenho da textura.
+//
+// grassTexture() espalhava 26 manchas radiais e 2600 lâminas em posições
+// aleatórias e desenhava cada uma UMA VEZ. Toda mancha e toda lâmina que
+// cai perto da borda é cortada ali. Ladrilhada 450 vezes, a textura vira
+// uma grade 450x450 de descontinuidades — e a grade é justamente o que o
+// olho acha primeiro num plano grande.
+//
+// Isto redesenha o elemento no vizinho de além-borda, de modo que o que
+// sai de um lado entra pelo outro. No máximo 4 desenhos por elemento (não
+// 9): só os vizinhos que o elemento de fato alcança.
+function wrapDraw(ctx, s, x, y, raio, desenha) {
+  const dxs = [0], dys = [0];
+  if (x < raio) dxs.push(s); else if (x > s - raio) dxs.push(-s);
+  if (y < raio) dys.push(s); else if (y > s - raio) dys.push(-s);
+  for (let i = 0; i < dxs.length; i++) {
+    for (let j = 0; j < dys.length; j++) {
+      if (dxs[i] === 0 && dys[j] === 0) { desenha(); continue; }
+      ctx.save(); ctx.translate(dxs[i], dys[j]); desenha(); ctx.restore();
+    }
+  }
+}
+
 // ============================================================
 // PBR DERIVADO DE CAMPO DE ALTURA
 // ------------------------------------------------------------
@@ -2352,13 +2380,18 @@ function grassTexture(baseHex) {
     // manchas largas de tom antes das lâminas: gramado real tem áreas
     // mais secas e mais verdes, nunca cor única
     for (let i = 0; i < 26; i++) {
-      const g = ctx.createRadialGradient(
-        Math.random() * s, Math.random() * s, 0,
-        Math.random() * s, Math.random() * s, s * (0.15 + Math.random() * 0.3));
+      const cx = Math.random() * s, cy = Math.random() * s;
+      const r = s * (0.15 + Math.random() * 0.3);
+      // deslocamento pequeno entre os dois focos: dá à mancha um caimento
+      // assimétrico, mais parecido com área seca de gramado que um disco
+      const ox = (Math.random() - 0.5) * r * 0.5, oy = (Math.random() - 0.5) * r * 0.5;
       const tone = shadeHex(baseHex, 0.78 + Math.random() * 0.5);
-      g.addColorStop(0, tone); g.addColorStop(1, 'rgba(0,0,0,0)');
-      ctx.fillStyle = g;
-      ctx.fillRect(0, 0, s, s);
+      wrapDraw(ctx, s, cx, cy, r, () => {
+        const g = ctx.createRadialGradient(cx + ox, cy + oy, 0, cx, cy, r);
+        g.addColorStop(0, tone); g.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx.fillStyle = g;
+        ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
+      });
     }
     // lâminas
     ctx.lineCap = 'round';
@@ -2366,14 +2399,18 @@ function grassTexture(baseHex) {
       const x = Math.random() * s, y = Math.random() * s;
       const a = -Math.PI / 2 + (Math.random() - 0.5) * 1.7;
       const len = 3 + Math.random() * 7;
-      ctx.strokeStyle = shadeHex(baseHex, 0.6 + Math.random() * 0.75);
-      ctx.lineWidth = 0.7 + Math.random() * 1.1;
-      ctx.beginPath();
-      ctx.moveTo(x, y);
-      ctx.quadraticCurveTo(
-        x + Math.cos(a) * len * 0.5 + 1.5, y + Math.sin(a) * len * 0.5,
-        x + Math.cos(a) * len, y + Math.sin(a) * len);
-      ctx.stroke();
+      const cor = shadeHex(baseHex, 0.6 + Math.random() * 0.75);
+      const w = 0.7 + Math.random() * 1.1;
+      wrapDraw(ctx, s, x, y, len + 2, () => {
+        ctx.strokeStyle = cor;
+        ctx.lineWidth = w;
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+        ctx.quadraticCurveTo(
+          x + Math.cos(a) * len * 0.5 + 1.5, y + Math.sin(a) * len * 0.5,
+          x + Math.cos(a) * len, y + Math.sin(a) * len);
+        ctx.stroke();
+      });
     }
   });
   tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
@@ -2565,11 +2602,18 @@ function applyMacroVariation(material, scale, strength, prevHook) {
         // vertical e vira faixa contínua de cima a baixo. Nas paredes de
         // estuque isso lia como mancha de infiltração escorrendo.
         //
-        // Misturar os três eixos com pesos incomensuráveis tira o eixo
-        // degenerado sem precisar de normal nem de triplanar: nenhum
-        // plano do mundo deixa a coordenada parada.
-        '  vec2 mp = vec2(vMacroWPos.x + vMacroWPos.z * 0.62,',
-        '                 vMacroWPos.y + vMacroWPos.z * 0.37) / uMacroScale;',
+        // A primeira tentativa de correção — (x + 0,62z, y + 0,37z) —
+        // consertou a parede e QUEBROU o chão: no plano horizontal a
+        // segunda componente passou a depender só de z, então o ruído
+        // parou de variar ao longo de x e o gramado virou um acolchoado
+        // diagonal, bem pior que a faixa original.
+        //
+        // Não basta os três eixos aparecerem: os pesos têm de deixar a
+        // matriz 2x2 bem condicionada para QUALQUER par de eixos, senão
+        // sempre há um plano onde ela degenera. Com estes pesos os três
+        // determinantes são 0,81 (xz), 0,46 (yz) e 0,35 (xy).
+        '  vec2 mp = vec2(vMacroWPos.x * 0.90 + vMacroWPos.y * 0.60 + vMacroWPos.z * 0.20,',
+        '                 vMacroWPos.x * 0.25 + vMacroWPos.y * 0.55 + vMacroWPos.z * 0.95) / uMacroScale;',
         // duas oitavas incomensuráveis com o período do ladrilho
         '  float n = auraNoise(mp) * 0.62 + auraNoise(mp * 2.73) * 0.38;',
         '  diffuseColor.rgb *= 1.0 + (n - 0.5) * 2.0 * uMacroStrength;',
@@ -2641,6 +2685,17 @@ const indoorU = {
   // parede é difuso e não produz reflexo nítido.
   bounce: { value: new THREE.Color(0xffe6cc) },
   fill: { value: 0.15 },
+  // Teto do termo de janela.
+  //
+  // A primeira versão devolvia k = 1,0 junto ao vidro, ou seja: céu
+  // INTEIRO. Com envI em 0,85 a faixa de piso rente à janela estourou
+  // para branco — apareceu no render de perto do vidro.
+  //
+  // E 1,0 nunca esteve certo: janela é ABERTURA. Uma superfície colada no
+  // vidro enxerga, no melhor caso, meio hemisfério — a metade que o vão
+  // recorta — e não a abóbada toda. 0,55 é esse limite geométrico, não um
+  // número escolhido para a imagem ficar boa.
+  winMax: { value: 0.55 },
 };
 
 function applyIndoorOcclusion(material, prevHook) {
@@ -2668,6 +2723,7 @@ function applyIndoorOcclusion(material, prevHook) {
     shader.uniforms.uIndoorMin = indoorU.min;
     shader.uniforms.uIndoorBounce = indoorU.bounce;
     shader.uniforms.uIndoorFill = indoorU.fill;
+    shader.uniforms.uIndoorWinMax = indoorU.winMax;
 
     shader.vertexShader = 'varying vec3 vIndoorWPos;\n' + shader.vertexShader.replace(
       '#include <begin_vertex>',
@@ -2680,6 +2736,7 @@ function applyIndoorOcclusion(material, prevHook) {
       'uniform float uIndoorMin;',
       'uniform vec3 uIndoorBounce;',
       'uniform float uIndoorFill;',
+      'uniform float uIndoorWinMax;',
       'varying vec3 vIndoorWPos;',
       'float auraBoxIn(vec3 p, vec3 lo, vec3 hi){',
       '  vec3 s = smoothstep(lo, lo + vec3(0.10), p) * (vec3(1.0) - smoothstep(hi - vec3(0.10), hi, p));',
@@ -2692,7 +2749,7 @@ function applyIndoorOcclusion(material, prevHook) {
       '    float ins = auraBoxIn(p, uIndoorLo[i], uIndoorHi[i]);',
       // perto do vidro o céu entra de verdade: volta para 1 nos ~4 m finais
       '    float win = smoothstep(uIndoorGlassZ[i] - 4.6, uIndoorGlassZ[i] - 0.3, p.z);',
-      '    k = min(k, mix(1.0, mix(uIndoorMin, 1.0, win), ins));',
+      '    k = min(k, mix(1.0, mix(uIndoorMin, uIndoorWinMax, win), ins));',
       '    dentro = max(dentro, ins);',
       '  }',
       '  return vec2(k, dentro);',
@@ -2866,8 +2923,17 @@ function buildMaterials() {
     banheira:     new THREE.MeshStandardMaterial({ color: 0xf4f1ea, roughness: 0.25, metalness: 0 }),
     gramado:      new THREE.MeshStandardMaterial({
       map: grassTexture('#6f8a4f'),
-      normalMap: noiseNormalTexture(8, 2.6),
-      normalScale: new THREE.Vector2(0.7, 0.7),
+      // ACHADO RENDERIZANDO em ângulo rasante: o gramado inteiro era um
+      // acolchoado de losangos, como manta tricotada.
+      //
+      // Não era filtragem — anisotropia 8 de um máximo de 16, mipmap
+      // linear, tudo ligado. Era o normal map: noiseNormalTexture(8, ...)
+      // gera uma textura de 128 px com apenas OITO células de ruído, e um
+      // padrão de 8 células é quase regular por construção. Repetido 450
+      // vezes, com força 2,6, ele deixa de ser relevo de grama e vira
+      // trama. Mais células e menos força tiram a regularidade.
+      normalMap: noiseNormalTexture(24, 1.15),
+      normalScale: new THREE.Vector2(0.5, 0.5),
       roughness: 0.96, metalness: 0, envMapIntensity: 0.22,
     }),
     // CAMPO DISTANTE — material separado do gramado do lote.
@@ -2946,7 +3012,15 @@ function buildMaterials() {
       // microrrelevo que espalha um pouco o reflexo; roughness um pouco
       // maior e reflexo mais fraco entregam a mesma leitura sem a cor
       // chapada.
-      color: 0xe4e8e6, roughness: 0.075, metalness: 0,
+      // CORRIGIDO depois, olhando o vidro de perto: 0,075 resolvia o
+      // reflexo e estragava a TRANSMISSÃO. No Three.js a rugosidade
+      // borra o que se vê ATRAVÉS do vidro (o alvo de transmissão é
+      // amostrado em mip mais alto), e a sala do outro lado aparecia
+      // como um véu leitoso. Quem já estava segurando o reflexo era o
+      // envMapIntensity em 0,55; a rugosidade podia voltar a um valor de
+      // vidro plano. Vidro arquitetônico é opticamente liso — se ele
+      // borra o que está atrás, não é vidro, é acrílico jateado.
+      color: 0xe4e8e6, roughness: 0.040, metalness: 0,
       transmission: 0.85, thickness: 0.02, ior: 1.52,
       transparent: false, opacity: 1.0, side: THREE.DoubleSide,
       envMapIntensity: 0.55,
@@ -2989,7 +3063,11 @@ function buildMaterials() {
   // câmera a lâmina de grama tem tamanho plausível; o padrão que essa
   // repetição criaria é dissolvido por applyMacroVariation() logo abaixo.
   M.gramado.map.repeat.set(450, 450);
-  M.gramado.normalMap.repeat.set(450, 450);
+  // Repetição DIFERENTE da cor, e não múltipla dela: cor e relevo com o
+  // mesmo período fazem os dois ladrilhos coincidirem sempre no mesmo
+  // ponto, e a coincidência é o que o olho lê como grade. Com períodos
+  // incomensuráveis o encontro anda, e o padrão deixa de fechar.
+  M.gramado.normalMap.repeat.set(317, 317);
   applyMacroVariation(M.gramado, 11.0, 0.16);
   // 26 m por ladrilho no campo distante, com variação macro forte e de
   // escala grande: o que se lê de longe é a mancha, não a lâmina.
