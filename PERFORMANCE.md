@@ -27,11 +27,17 @@ aparelhos. Qualquer número de fps neste documento seria inventado.
 
 | Métrica | Antes | Depois | Delta |
 |---|---|---|---|
-| Draw calls (ultra) | 477 | **297** | −38% |
-| Draw calls (high) | 477 | 297 | −38% |
-| Draw calls (medium) | 515 | 363 | −30% |
-| Draw calls (low) | 511 | 361 | −29% |
-| Programas (ultra) | 93 | 84 | −10% |
+| Draw calls (ultra) | 477 | **333** | −30% |
+| Draw calls (high) | 477 | 333 | −30% |
+| Draw calls (medium) | 515 | 359 | −30% |
+| Draw calls (low) | 511 | 359 | −30% |
+| Programas (ultra) | 93 | 93 | 0% |
+| Programas (high) | 86 | 62 | −28% |
+| Programas (low) | 58 | 58 | 0% |
+
+Draw calls medidos com `probe.mjs`, mesma câmera do "antes", para a
+comparação ser maçã com maçã. Na câmera do capítulo 1, com os marcadores
+de hotspot fora do quadro, o número é 297.
 | Materiais distintos na cena | 136 | 110 | −19% |
 | Geometrias | 237 | 151 | −36% |
 | Meshes opacos estáticos | 170 | 107 | −37% |
@@ -174,7 +180,7 @@ Sem rodeio, com o motivo:
 | Item | Por quê |
 |---|---|
 | Uber-shader (meta ≤12 programas) | A causa medida não são os hooks (11 materiais), são as variantes de `#define` sobre 136 materiais. Um uber-shader de verdade significa reimplementar o PBR do Three.js — IBL, sombras, tone mapping, gerenciamento de cor. É semanas de trabalho com regressão visual garantida no meio. O caminho barato é continuar reduzindo materiais distintos. |
-| Draw calls ≤120 no ultra | Chegou a 297. O que sobra são 32 meshes que diferem em flag de sombra (entra na chave de propósito) e ~150 objetos com material próprio. Passar disso exige `BatchedMesh` e instancing de props, que não couberam. |
+| Draw calls ≤120 no ultra | Chegou a 333 (297 na câmera do capítulo). O que sobra são 32 meshes que diferem em flag de sombra (entra na chave de propósito) e ~150 objetos com material próprio. Passar disso exige `BatchedMesh` e instancing de props, que não couberam. |
 | Web Worker de textura | A medição mostrou que o 1 s é aquecimento de primeira chamada, não trabalho por textura. O worker moveria o custo. |
 | PMREM pré-gerado em build | Fiz o orçamento de 900 ms, que resolve o engasgo. Pré-gerar exige pipeline de `.env` e crossfade entre dois environments. |
 | LOD/impostor de vegetação | Só o `alphaTest` por tier entrou. |
