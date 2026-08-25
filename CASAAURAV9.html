@@ -1557,6 +1557,22 @@ function woodGrainTexture(baseHex, streakHex, repeatX, repeatY, opts) {
     }
     ctx.globalAlpha = 1;
   });
+  // ------------------------------------------------------------
+  // BUG CORRIGIDO — o deck de ipê refletia o céu como espelho
+  // Localizado por raycast: a chapa branca no primeiro plano da câmera
+  // da piscina era o DECK, não a água.
+  //
+  // Causa: makeCanvasTexture() marca a textura como sRGB, o que está
+  // certo para mapa de COR e errado para mapa de RUGOSIDADE. Um mapa
+  // cinza #888 (0,533) convertido de sRGB para linear vira 0,247, e o
+  // Three.js MULTIPLICA a rugosidade do material por esse valor: a
+  // madeira saía com roughness 0,66 x 0,247 = 0,16 em vez de 0,66.
+  // Praticamente verniz espelhado — e em ângulo rasante, por Fresnel,
+  // isso reflete o céu quase por inteiro. Daí a chapa branca.
+  //
+  // Mapas de dado (rugosidade, metalicidade, normal, AO) são NUMEROS,
+  // não cor: têm de ser lidos em espaço linear.
+  tex.colorSpace = THREE.NoColorSpace;
   tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
   tex.repeat.set(repeatX, repeatY);
   return tex;
@@ -1925,6 +1941,7 @@ function noiseNormalTexture(scale, strength) {
   }
   ctx.putImageData(img, 0, 0);
   const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.NoColorSpace;   // mapa de dado, não de cor
   tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
   return tex;
 }
@@ -2011,6 +2028,7 @@ function waterRippleTexture() {
   }
   ctx.putImageData(img, 0, 0);
   const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.NoColorSpace;   // mapa de dado, não de cor
   tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
   tex.repeat.set(3, 2);
   return tex;

@@ -1,7 +1,7 @@
 // Sonda de diagnóstico: constrói a cena e reporta números, sem gravar
-// imagem. Screenshot em SwiftShader custa ~1 min cada; isto roda em
-// segundos e é o que se usa para validar fusão, contagem de objetos e
-// erros de console a cada alteração.
+// imagem. Screenshot em SwiftShader custa minutos; isto roda em segundos
+// e é o que se usa para validar fusão, contagem de objetos, teste
+// estrutural e — com AURA_MAT — qual material está sob um ponto da tela.
 import { chromium } from '/opt/node22/lib/node_modules/playwright/index.mjs';
 
 const Q = process.env.AURA_Q || 'high';
@@ -23,63 +23,49 @@ const out = await page.evaluate(() => {
   let meshes = 0, instanced = 0, merged = 0, insts = 0, tris = 0;
   A.scene.traverse(o => {
     if (!o.isMesh) return;
-    if (o.isInstancedMesh) { instanced++; insts += o.count; }
-    else meshes++;
+    if (o.isInstancedMesh) { instanced++; insts += o.count; } else meshes++;
     if (o.userData.merged) merged++;
     const g = o.geometry;
-    if (g && g.index) tris += (g.index.count / 3) * (o.isInstancedMesh ? o.count : 1);
-    else if (g && g.attributes.position) tris += (g.attributes.position.count / 3) * (o.isInstancedMesh ? o.count : 1);
+    const n = o.isInstancedMesh ? o.count : 1;
+    if (g && g.index) tris += (g.index.count / 3) * n;
+    else if (g && g.attributes.position) tris += (g.attributes.position.count / 3) * n;
   });
-  // enquadramento panorâmico: mede a cena inteira, não um canto dela
   A.shot([18, 7.5, 16], [-1, 4.2, 0]);
-  const s = A.stats();
   return {
     quality: A.Quality.level,
     failedStep: A.BuildTrace.failedStep,
     error: A.BuildTrace.error ? String(A.BuildTrace.error) : null,
     composerFailed: A.composerFailed,
+    passes: A.composer ? A.composer.passes.map(p => p.constructor.name) : null,
     meshesSimples: meshes, instancedMeshes: instanced, instancias: insts,
-    meshesFundidos: merged,
-    trianglesCena: Math.round(tris),
-    render: s,
+    meshesFundidos: merged, trianglesCena: Math.round(tris),
+    render: A.stats(),
     selftest: A.selftest(),
   };
 });
+console.log(JSON.stringify(out, null, 1));
 
-// Sonda de material: pontos suspeitos na captura da chegada.
-const matSonda = await page.evaluate(() => {
-  const A = window.__AURA;
-  A.shot([-5.6, 1.7, 16.5], [-5.6, 0.9, 9.0]);
-  const pts = {
-    'branco-perto':  [-0.10, -0.75],
-    'branco-medio':  [ 0.05, -0.40],
-    'branco-longe':  [ 0.00, -0.18],
-    'tufo-grama':    [-0.08, -0.30],
-    'faixa-verde':   [-0.55, -0.14],
-  };
-  const out = {};
-  for (const k in pts) out[k] = A.matAt(pts[k][0], pts[k][1]);
-  out.passes = A.composer ? A.composer.passes.map(p => p.constructor.name) : null;
-  return out;
-});
-console.log('SONDA DE MATERIAL', JSON.stringify(matSonda, null, 1));
-
-// Uma imagem só, para medir exposição/cor sem pagar a bateria inteira.
-if (process.env.AURA_SHOT) {
-  const [nm, px, py, pz, lx, ly, lz] = process.env.AURA_SHOT.split(',');
-  await page.evaluate(([p, l]) => {
-    ['loader','hero','top-bar','bottom-bar','commercial','debug-panel','cta-whatsapp','present-controls','ch-overlay','nav-dots','hs-label'].forEach(id => {
-      const el = document.getElementById(id);
-      if (el) { el.classList.add('hidden'); el.classList.remove('visible','show'); el.style.display = 'none'; }
+// AURA_MAT="px,py,pz,lx,ly,lz;nx1,ny1;nx2,ny2;..."
+// Posiciona a câmera e diz qual material está sob cada ponto da tela.
+if (process.env.AURA_MAT) {
+  const [cam, ...pts] = process.env.AURA_MAT.split(';');
+  const c = cam.split(',').map(Number);
+  const sonda = await page.evaluate(([c, pts]) => {
+    const A = window.__AURA;
+    A.shot([c[0], c[1], c[2]], [c[3], c[4], c[5]]);
+    return pts.map(p => {
+      const [nx, ny] = p.split(',').map(Number);
+      return { ponto: p, hit: A.matAt(nx, ny) };
     });
-    window.__AURA.renderer.setPixelRatio(1);
-    window.__AURA.shot(p, l);
-  }, [[+px, +py, +pz], [+lx, +ly, +lz]]);
-  await page.waitForTimeout(800);
-  await page.screenshot({ path: nm, timeout: 300000, animations: 'disabled' });
-  console.log('imagem:', nm);
+  }, [c, pts]);
+  console.log('\nSONDA DE MATERIAL');
+  for (const s of sonda) {
+    const h = s.hit;
+    console.log(h
+      ? `  (${s.ponto})  ${h.material}  dist ${h.dist}  uv ${h.uv}  fundido ${h.fundido}`
+      : `  (${s.ponto})  nada`);
+  }
 }
 
-console.log(JSON.stringify(out, null, 2));
-if (logs.length) console.log('--- CONSOLE ---\n' + logs.slice(0, 25).join('\n'));
+if (logs.length) console.log('\n--- CONSOLE ---\n' + logs.slice(0, 20).join('\n'));
 await browser.close();
