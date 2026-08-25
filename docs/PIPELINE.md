@@ -131,8 +131,19 @@ Para blindar um objeto novo contra a fusão: `obj.userData.noMerge = true`.
 
 **Orçamento de luzes.** `MeshStandardMaterial` avalia todas as luzes por
 fragmento. `addFixture()` cria `PointLight` real só enquanto há
-orçamento (`LIGHT_BUDGET` por tier); o resto fica apenas como material
-emissivo, que custa zero.
+orçamento (`LIGHT_BUDGET` por tier: 6/4/2/1); o resto fica apenas como
+material emissivo, que custa zero.
+
+É esse orçamento que explica `applyUplightWash()`. A luz de fachada à
+noite é o que dá relevo ao edifício depois que o sol some, mas gastar 8
+`PointLight` nela consumiria o orçamento inteiro — a versão anterior do
+projeto já havia cortado os uplights de 8 para 1 por isso. A lavagem é
+então calculada **dentro do material**: por ponto de luminária, um
+decaimento radial em XZ e um decaimento vertical ao quadrado a partir da
+base, somados em `totalEmissiveRadiance`. Custa algumas instruções por
+fragmento em dois materiais (`estuque`, `stoneCore`) e não entra no
+orçamento. Em `medium`/`low` usa metade dos pontos — o laço é desenrolado
+no shader, então o número de pontos é literalmente o de iterações.
 
 ---
 
@@ -151,6 +162,13 @@ node mkpage.mjs                  # gera index.html a partir do HTML de produçã
 `mkpage.mjs` reescreve o importmap para `node_modules` e injeta
 `window.__AURA` com ganchos de teste. **O arquivo de produção não muda** —
 o que a captura mostra é o que o arquivo real renderiza.
+
+Ele também **valida a sintaxe da página gerada** antes de gravar, e sai
+com código 1 se falhar. Isso existe por experiência: um escape errado
+dentro do gancho injetado torna a página inteira JS inválido, e o sintoma
+que aparece minutos depois é `módulo não expôs __AURA` — que parece
+defeito da cena, não do teste. Rodar `node --check` no arquivo de
+produção não pega: quem precisa ser válido é o que o navegador carrega.
 
 | Script | Para quê | Custo |
 |---|---|---|
