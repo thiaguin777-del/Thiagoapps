@@ -1135,14 +1135,19 @@ function setupLighting() {
   // avaliação LTC por fragmento.
   if (Quality.level === 'ultra' || Quality.level === 'high') {
     windowLights.push(
-      { w: 3.2, h: 1.6, pos: [-10.9, 1.8, -3.0], alvo: [-4.0, 1.5, -3.0] },  // janela oeste, social
-      { w: 3.2, h: 1.6, pos: [11.9, 1.8, -3.0],  alvo: [6.0, 1.5, -3.0] },   // janela leste, suíte
+      // k = 0,5: são vãos pequenos voltados a leste/oeste, que enxergam
+      // menos céu que a fachada sul inteira em vidro. Sem esse fator elas
+      // ficavam a 1,5 m do forro e deixavam uma poça quente no teto —
+      // apareceu no render do cap. 4 antes de a sonda apontar a causa.
+      { w: 3.2, h: 1.6, pos: [-10.9, 1.8, -3.0], alvo: [-4.0, 1.5, -3.0], k: 0.5 },  // janela oeste, social
+      { w: 3.2, h: 1.6, pos: [11.9, 1.8, -3.0],  alvo: [6.0, 1.5, -3.0], k: 0.5 },   // janela leste, suíte
     );
   }
   windowLights.forEach(wl => {
     const rl = new THREE.RectAreaLight(0xf2ede2, 0, wl.w, wl.h);
     rl.position.set(wl.pos[0], wl.pos[1], wl.pos[2]);
     rl.lookAt(wl.alvo[0], wl.alvo[1], wl.alvo[2]);
+    rl.userData.k = wl.k === undefined ? 1 : wl.k;
     scene.add(rl);
     rectLights.push(rl);
   });
@@ -1402,7 +1407,8 @@ function applySolarTime(t) {
     // window.__RECT_K é um ponto de ajuste deliberado: permite calibrar a
     // luz de janela pelo console no aparelho real, ou pela varredura
     // automatizada em .devtest/tune.mjs, sem recompilar nada.
-    rectLights[i].intensity = Math.max(0, (1.0 - solarTime * 1.25)) * (window.__RECT_K || RECT_K);
+    rectLights[i].intensity = Math.max(0, (1.0 - solarTime * 1.25)) * (window.__RECT_K || RECT_K)
+      * (rectLights[i].userData.k === undefined ? 1 : rectLights[i].userData.k);
     rectLights[i].color.setHex(solarTime < 0.5 ? 0xf2ede2 : 0xf5d9b4);
   }
 
@@ -3078,25 +3084,31 @@ function buildMaterials() {
   applyMacroVariation(M.travertino, 5.0, 0.06);
 
   // ------------------------------------------------------------
-  // OCLUSÃO DO IBL PARA MATERIAIS DE INTERIOR
+  // RESPOSTA AO AMBIENTE, POR MATERIAL
   // ------------------------------------------------------------
-  // O mapa de ambiente é aplicado SEM OCLUSÃO: um tapete dentro do
-  // quarto recebe a abóbada celeste inteira, exatamente como se
-  // estivesse no jardim. Como o céu é azul e o interior é escuro, toda
-  // superfície clara de dentro puxava para cinza-azulado — foi o que
-  // fez o piso do quarto ler como ardósia e o tapete de lã como concreto
-  // molhado.
+  // Esta tabela já foi uma tentativa de resolver "superfície interna
+  // recebendo o céu inteiro" baixando envMapIntensity de todo material que
+  // costuma viver dentro de casa. Não funcionava, por duas razões:
   //
-  // Não há oclusão de IBL em tempo real sem ray tracing. O que se faz em
-  // archviz é o que está aqui: material que vive DENTRO recebe uma
-  // fração do ambiente, porque na prática ele enxerga teto e paredes, e
-  // não o céu. O GTAO cuida do contato; isto cuida do hemisfério.
-  const interiores = {
-    tapete: 0.10, tecidoSofa: 0.10, tecidoEscuro: 0.10, roupaCama: 0.12,
-    banheira: 0.22, vaso: 0.16, portaEscura: 0.14, bancada: 0.30,
-    madeiraClara: 0.20, forroMadeira: 0.14, latao: 0.45, metal: 0.55,
+  //  - não é propriedade do material, é da POSIÇÃO. madeiraClara é o piso
+  //    do quarto E o piso do terraço superior; metal é o puxador E os
+  //    montantes da fachada; latão é a base do abajur E as ferragens
+  //    externas. Baixar o material escurecia o lado de fora junto.
+  //  - o sintoma reaparecia na superfície seguinte a cada render. Eu
+  //    corrigi parede, depois tapete, depois piso do quarto, e o quarto
+  //    defeito estava esperando.
+  //
+  // Quem cuida de dentro-versus-fora agora é applyIndoorOcclusion(), que
+  // é geométrica e vale para todo material de uma vez. O que sobra aqui é
+  // o que realmente é propriedade do material: tecido fosco reflete pouco
+  // ambiente, latão polido reflete muito. Valores de volta a patamares
+  // físicos — a máscara é que multiplica por fora.
+  const respostaAoAmbiente = {
+    tapete: 0.30, tecidoSofa: 0.30, tecidoEscuro: 0.28, roupaCama: 0.34,
+    banheira: 0.55, vaso: 0.45, portaEscura: 0.40, bancada: 0.65,
+    madeiraClara: 0.45, forroMadeira: 0.38, latao: 0.90, metal: 1.00,
   };
-  Object.keys(interiores).forEach(k => { if (M[k]) M[k].envMapIntensity = interiores[k]; });
+  Object.keys(respostaAoAmbiente).forEach(k => { if (M[k]) M[k].envMapIntensity = respostaAoAmbiente[k]; });
 
   // Sem anisotropia, uma textura repetida 450x vira ruído cintilante em
   // ângulo rasante — que é exatamente como se olha um gramado.
@@ -3952,12 +3964,22 @@ function createNightstand() {
   const g = new THREE.Group();
   const body = rbox(0.42, 0.5, 0.38, M.madeiraClara);
   body.position.y = 0.25; g.add(body);
-  const lamp = latheProfile([[0.03,0],[0.09,0.06],[0.12,0.15],[0.125,0.19]], 16, M.tecidoSofa);
-  lamp.position.y = 0.55; g.add(lamp);
-  lamp.material = new THREE.MeshStandardMaterial({
-    color: 0xcabfa9, roughness: 0.95, emissive: 0xffdca8, emissiveIntensity: 0,
-  });
-  addFixture(g, [0, 0.58, 0], 0xffdca8, lamp.material, 3.0, 'emissive-only');
+  // Abajur com pé, haste e cúpula aberta — antes era a mesma calota
+  // fechada da luminária de piso, que renderizava como tigela branca.
+  const pe = latheProfile([[0, 0], [0.055, 0], [0.058, 0.012], [0.03, 0.022], [0.012, 0.028]], 16, M.latao);
+  pe.position.y = 0.50; g.add(pe);
+  const haste = new THREE.Mesh(sharedCyl(0.011, 0.011, 0.20, 10), M.latao);
+  haste.position.y = 0.62; g.add(haste);
+
+  const sm = shadeMaterial();
+  const cupula = lampShade(0.095, 0.125, 0.155, sm);
+  cupula.position.y = 0.79; g.add(cupula);
+
+  const bulb = lampBulb(0.028);
+  bulb.position.y = 0.775; g.add(bulb);
+
+  addFixture(g, [0, 0.79, 0], 0xffdca8, sm, 3.0, 'emissive-only');
+  emissiveFixtures.push(bulb.material);
   return g;
 }
 
@@ -4030,21 +4052,68 @@ function createPendantCluster(n) {
   return g;
 }
 
+// Cúpula de abajur: cilindro ABERTO nas duas pontas, com DoubleSide.
+//
+// As duas luminárias da casa usavam latheProfile com um perfil que nunca
+// volta ao eixo — uma calota FECHADA. De fora só existe a superfície
+// externa, e o resultado renderizado era literalmente uma tigela branca
+// pousada no móvel: sem lâmpada, sem interior, sem leitura de luminária.
+//
+// O que faz o olho reconhecer um abajur é ver a face INTERNA da cúpula,
+// mais clara que a externa, e a lâmpada dentro. Cilindro aberto entrega
+// as duas coisas por um punhado de triângulos.
+function lampShade(rTop, rBot, h, mat) {
+  const m = new THREE.Mesh(new THREE.CylinderGeometry(rTop, rBot, h, 20, 1, true), mat);
+  // Cúpula aberta projeta sombra incoerente (a "tampa" não existe), e é
+  // fina o bastante para a sombra não fazer falta.
+  m.castShadow = false;
+  m.receiveShadow = true;
+  return m;
+}
+
+function shadeMaterial() {
+  return new THREE.MeshStandardMaterial({
+    color: 0xf1e6d2, roughness: 0.92, metalness: 0,
+    emissive: 0xffdca8, emissiveIntensity: 0,
+    side: THREE.DoubleSide,
+  });
+}
+
+// Lâmpada visível pela boca da cúpula. De dia é uma esfera fosca pequena;
+// à noite é o ponto quente que denuncia que a luminária está acesa.
+function lampBulb(r) {
+  const mat = new THREE.MeshStandardMaterial({
+    color: 0xfff4e0, roughness: 0.35, metalness: 0,
+    emissive: 0xffe6bc, emissiveIntensity: 0, envMapIntensity: 0.2,
+  });
+  const m = new THREE.Mesh(new THREE.SphereGeometry(r, 10, 8), mat);
+  m.castShadow = false;
+  return m;
+}
+
 function createFloorLamp() {
   if (Assets) { const _m = Assets.model('lamp'); if (_m) {
     const _g = new THREE.Group(); _m.scale.setScalar(1); _g.add(_m); return _g; } }
   const g = new THREE.Group();
-  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 1.4, 8), M.metal);
-  pole.position.y = 0.7; g.add(pole);
-  // cúpula com perfil torneado (curva real), não um cone
-  const shade = latheProfile([[0.05,0],[0.17,0.10],[0.22,0.24],[0.225,0.30]], 20, M.tecidoSofa);
-  shade.position.y = 1.30; g.add(shade);
-  const base = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.16, 0.03, 16), M.metal);
+  const pole = new THREE.Mesh(sharedCyl(0.016, 0.016, 1.44, 10), M.latao);
+  pole.position.y = 0.72; g.add(pole);
+  // base em disco torneado: dá peso visual ao pé e evita a haste nascendo
+  // do chão sem apoio
+  const base = latheProfile([[0, 0], [0.15, 0], [0.155, 0.012], [0.09, 0.026], [0.02, 0.03]], 20, M.latao);
   g.add(base);
-  shade.material = new THREE.MeshStandardMaterial({
-    color: 0xcabfa9, roughness: 0.95, emissive: 0xffdca8, emissiveIntensity: 0,
-  });
-  addFixture(g, [0, 1.4, 0], 0xffdca8, shade.material, 3.6);
+
+  const sm = shadeMaterial();
+  const shade = lampShade(0.185, 0.215, 0.26, sm);
+  shade.position.y = 1.44; g.add(shade);
+  // aro superior, para a boca da cúpula não terminar numa aresta de papel
+  const aro = new THREE.Mesh(sharedCyl(0.186, 0.186, 0.012, 20), M.latao);
+  aro.position.y = 1.566; aro.castShadow = false; g.add(aro);
+
+  const bulb = lampBulb(0.045);
+  bulb.position.y = 1.44; g.add(bulb);
+
+  addFixture(g, [0, 1.44, 0], 0xffdca8, sm, 3.6);
+  emissiveFixtures.push(bulb.material);
   return g;
 }
 
@@ -4709,9 +4778,20 @@ function buildPrimarySuite() {
   suiteCurtains.position.set(6.2, 0.12, 5.78);
   g.add(suiteCurtains);
 
-  // Cove atrás da cabeceira — luz indireta, não point light solta
+  // Cove no encontro parede/teto, acima do armário.
+  //
+  // Estava em (6,5 / 1,62 / -1,55), descrito como "cove atrás da
+  // cabeceira". Só que a cabeceira NÃO ENCOSTA em parede — a cama fica
+  // solta no meio do quarto, com o armário 4,2 m atrás. A fita ficava
+  // pendurada no ar lavando o vazio, e de dia aparecia como uma barra
+  // clara atravessando o quarto na altura da cabeceira. Sonda: objeto de
+  // 2,6 x 0,12 x 0,11 m em z = -1,51, com a parede em z = -5,99.
+  //
+  // Cove de verdade precisa de superfície para lavar. Vai para a mesma
+  // junção parede/teto usada na sala e no nível superior — a casa passa a
+  // ter uma linguagem só de luz indireta em vez de três soluções.
   const headCove = createCoveLight(2.6, 0xffd2a0);
-  headCove.position.set(6.5, 1.62, -1.55);
+  headCove.position.set(6.5, 3.02, -5.86);
   g.add(headCove);
   collectLamps(headCove);
 

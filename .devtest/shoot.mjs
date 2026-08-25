@@ -65,6 +65,21 @@ await page.evaluate(() => {
   });
 });
 
+// Os marcadores de hotspot são MALHA 3D, não DOM: esconder os overlays
+// não os tirava do quadro. Passei um tempo tratando "um anel laranja no
+// meio do encosto do sofá" como defeito de material antes da sonda dizer
+// que era um objeto de 20 cm flutuando na frente dele — o marcador
+// clicável, que no produto deve mesmo aparecer. Numa imagem de avaliação
+// ele só atrapalha o julgamento da cena.
+// AURA_HOTSPOTS=1 mantém os marcadores, para conferir o desenho deles.
+if (!process.env.AURA_HOTSPOTS) {
+  await page.evaluate(() => {
+    window.__AURA.scene.traverse(o => {
+      if (o.isMesh && o.userData && (o.userData.isRing || o.userData.id !== undefined)) o.visible = false;
+    });
+  });
+}
+
 // A luz do capítulo faz parte do enquadramento: sem aplicá-la, um
 // capítulo 'night' era renderizado com a luz de dia — foi assim que uma
 // cena noturna apareceu clara e levou a um diagnóstico errado do céu.
