@@ -1,0 +1,15 @@
+[error] Failed to load resource: net::ERR_CONNECTION_RESET
+[error] Failed to load resource: the server responded with a status of 404 (Not Found)
+[info] Assets externos: {textures: 0, models: 0}
+[info] Sombras: desligadas em 158 objetos pequenos, mantidas em 228
+[info] fusão[Arquitetura]: -46 draw calls
+[info] fusão[Sala de Estar]: -37 draw calls
+[info] fusão[Jantar]: -40 draw calls
+[info] fusão[Cozinha]: -21 draw calls
+[info] fusão[Suíte Master]: -34 draw calls
+[info] fusão[Nível Superior]: -42 draw calls
+[info] fusão[Piscina & Deck]: -90 draw calls
+[info] fusão[Paisagismo]: -3 draw calls
+[info] fusão[Volume Superior]: -26 draw calls
+[info] Fusão estática: -339 draw calls no total
+[warning] Casa Aura: CTA oculto — configure o contato em CONFIG.whatsappThiago ou via ?wa=NUMERO

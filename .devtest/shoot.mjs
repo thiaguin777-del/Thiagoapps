@@ -26,7 +26,7 @@ const browser = await chromium.launch({
     '--disable-lcd-text',
   ],
 });
-const page = await browser.newPage({ viewport: { width: 1280, height: 720 }, deviceScaleFactor: 1 });
+const page = await browser.newPage({ viewport: { width: +(process.env.AURA_W || 1280), height: +(process.env.AURA_H || 720) }, deviceScaleFactor: 1 });
 
 const logs = [];
 page.on('console', m => logs.push(`[${m.type()}] ${m.text()}`));

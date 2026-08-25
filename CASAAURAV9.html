@@ -1104,7 +1104,7 @@ function setupLighting() {
 // do dia. Sem isso o céu noturno continuava iluminando a casa como se
 // fosse meio-dia, porque envMapIntensity é constante por material.
 const LP = {
-  day:    { bg: 0x87CEEB, fog: 0xdbe7ef, fogD: 0.00330, sunC: 0xfff5e6, sunI: 2.40, hemiSky: 0xcfe2f2, hemiGnd: 0xa8906c, hemiI: 0.30, amb: 0.05, exp: 0.85, envI: 0.45, pool: 0.0,  lamp: 0.0,  glassGlow: 0.00, waterGlow: 0.00 },
+  day:    { bg: 0x87CEEB, fog: 0xdbe7ef, fogD: 0.00330, sunC: 0xfff5e6, sunI: 2.40, hemiSky: 0xcfe2f2, hemiGnd: 0xa8906c, hemiI: 0.30, amb: 0.05, exp: 0.875, envI: 0.45, pool: 0.0,  lamp: 0.0,  glassGlow: 0.00, waterGlow: 0.00 },
   golden: { bg: 0xE8A971, fog: 0xf0cfa8, fogD: 0.00400, sunC: 0xffb066, sunI: 2.20, hemiSky: 0xffcc88, hemiGnd: 0x9c7550, hemiI: 0.28, amb: 0.05, exp: 0.86, envI: 0.36, pool: 0.6,  lamp: 0.6,  glassGlow: 0.06, waterGlow: 0.05 },
   blue:   { bg: 0x24406b, fog: 0x35527c, fogD: 0.00300, sunC: 0x7fa0d8, sunI: 0.45, hemiSky: 0x4a72b0, hemiGnd: 0x3a3830, hemiI: 0.22, amb: 0.06, exp: 0.82, envI: 0.20, pool: 1.1,  lamp: 1.0,  glassGlow: 0.20, waterGlow: 0.15 },
   night:  { bg: 0x0a0e1a, fog: 0x0e1424, fogD: 0.00340, sunC: 0x33446a, sunI: 0.09, hemiSky: 0x1c2436, hemiGnd: 0x14120e, hemiI: 0.14, amb: 0.05, exp: 0.72, envI: 0.08, pool: 1.7,  lamp: 1.6,  glassGlow: 0.32, waterGlow: 0.22 },
@@ -2126,21 +2126,21 @@ function buildMaterials() {
     // recortada. Transparência ordenada seria mais bonita e muito mais
     // cara, com artefato de ordenação garantido em copa densa.
     copaArvore:   new THREE.MeshStandardMaterial({
-      map: leafCardTexture('#4e6b3c', { count: 200 }), alphaTest: 0.42, side: THREE.DoubleSide,
+      map: leafCardTexture('#5c7a48', { count: 200 }), alphaTest: 0.42, side: THREE.DoubleSide,
       roughness: 0.95, metalness: 0, envMapIntensity: 0.3,
     }),
     copaArvore2:  new THREE.MeshStandardMaterial({
-      map: leafCardTexture('#6d8a4a', { leafScale: 0.85, count: 230 }), alphaTest: 0.42, side: THREE.DoubleSide,
+      map: leafCardTexture('#7b9755', { leafScale: 0.85, count: 230 }), alphaTest: 0.42, side: THREE.DoubleSide,
       roughness: 0.95, metalness: 0, envMapIntensity: 0.3,
     }),
     copaArvore3:  new THREE.MeshStandardMaterial({
-      map: leafCardTexture('#426240', { narrow: true, count: 260, leafScale: 1.15 }), alphaTest: 0.42, side: THREE.DoubleSide,
+      map: leafCardTexture('#4f7150', { narrow: true, count: 260, leafScale: 1.15 }), alphaTest: 0.42, side: THREE.DoubleSide,
       roughness: 0.95, metalness: 0, envMapIntensity: 0.28,
     }),
     // Arbusto: folha pequena e densa. Reaproveitar a textura de copa
     // deixava o arbusto ralo, com aspecto de galho seco.
     arbusto:      new THREE.MeshStandardMaterial({
-      map: leafCardTexture('#5c7644', { count: 720, leafScale: 0.5 }), alphaTest: 0.4, side: THREE.DoubleSide,
+      map: leafCardTexture('#66804d', { count: 720, leafScale: 0.5 }), alphaTest: 0.4, side: THREE.DoubleSide,
       roughness: 0.96, metalness: 0, envMapIntensity: 0.28,
     }),
     // Gramínea de primeiro plano: lâminas saindo da base do cartão.
@@ -4424,7 +4424,7 @@ function buildDistantLandscape() {
   // jogo. Cada árvore são 2 cartões cruzados — 1 draw call para todas.
   // ------------------------------------------------------------
   const farMat = new THREE.MeshStandardMaterial({
-    map: leafCardTexture('#46603c', { count: 200, leafScale: 1.4 }),
+    map: leafCardTexture('#54704a', { count: 200, leafScale: 1.4 }),
     alphaTest: 0.45, side: THREE.DoubleSide,
     roughness: 1.0, metalness: 0, envMapIntensity: 0.15, fog: true,
   });
