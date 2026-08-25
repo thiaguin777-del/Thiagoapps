@@ -17,22 +17,15 @@ await page.goto('http://127.0.0.1:8099/index.html?debug=1&q=high', { waitUntil: 
 await page.waitForFunction(() => window.__AURA && window.__AURA.ready, null, { timeout: 240000 });
 await page.evaluate(() => window.__AURA.renderer.setPixelRatio(1));
 
-const ZON = {
-  teto:   [0.30, 0.00, 0.70, 0.10],
-  parede: [0.80, 0.20, 0.98, 0.70],
-  movel:  [0.40, 0.55, 0.60, 0.75],
-  piso:   [0.30, 0.85, 0.70, 0.99],
-};
-const CAMS = {
-  sala:  [[-8.6, 1.6, 3.2], [-8.8, 1.15, -2.2]],
-  suite: [[6.6, 1.6, 3.4], [6.6, 1.05, -1.4]],
-};
+const ZON = JSON.parse(process.env.AURA_ZON || '{"teto":[0.30,0,0.70,0.10],"parede":[0.80,0.20,0.98,0.70],"movel":[0.40,0.55,0.60,0.75],"piso":[0.30,0.85,0.70,0.99]}');
+const KS = Object.keys(ZON);
+const CAMS = JSON.parse(process.env.AURA_CAMS || '{"sala":[[-8.6,1.6,3.2],[-8.8,1.15,-2.2]]}');
 
 const FONTES = ['nenhuma', 'sol', 'hemi', 'ambient', 'rect', 'env', 'emissivos', 'wash'];
 
 for (const nomeCam in CAMS) {
   console.log(`\n############ ${nomeCam} ############`);
-  console.log('  desligando  |  teto parede  movel   piso');
+  console.log('  desligando  | ' + KS.map(k=>k.padStart(9)).join(' '));
   let base = null;
   for (const f of FONTES) {
     const r = await page.evaluate(([cam, zon, f]) => {
@@ -67,13 +60,11 @@ for (const nomeCam in CAMS) {
       return z;
     }, [CAMS[nomeCam], ZON, f]);
 
-    const linha = ['teto', 'parede', 'movel', 'piso']
-      .map(k => String(r[k].lum).padStart(6)).join(' ');
+    const linha = KS.map(k => String(r[k].lum).padStart(9)).join(' ');
     if (f === 'nenhuma') { base = r; console.log(`  ${'(base)'.padEnd(11)} | ${linha}`); }
     else {
-      const delta = ['teto', 'parede', 'movel', 'piso']
-        .map(k => { const d = r[k].lum - base[k].lum; return (d >= 0 ? '+' : '') + d.toFixed(0); })
-        .map(s => s.padStart(6)).join(' ');
+      const delta = KS.map(k => { const d = r[k].lum - base[k].lum; return (d >= 0 ? '+' : '') + d.toFixed(0); })
+        .map(s => s.padStart(9)).join(' ');
       console.log(`  ${f.padEnd(11)} | ${linha}   Δ ${delta}`);
     }
   }

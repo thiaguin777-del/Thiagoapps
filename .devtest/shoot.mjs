@@ -72,12 +72,19 @@ await page.evaluate(() => {
 // clicável, que no produto deve mesmo aparecer. Numa imagem de avaliação
 // ele só atrapalha o julgamento da cena.
 // AURA_HOTSPOTS=1 mantém os marcadores, para conferir o desenho deles.
+// Esconder por .visible NÃO funciona: o laço de render reescreve
+// `m.visible = hsVisible` em todo quadro, então o marcador voltava.
+// Tira do grafo de cena, que é o único jeito que o laço não desfaz.
 if (!process.env.AURA_HOTSPOTS) {
-  await page.evaluate(() => {
+  const n = await page.evaluate(() => {
+    const alvos = [];
     window.__AURA.scene.traverse(o => {
-      if (o.isMesh && o.userData && (o.userData.isRing || o.userData.id !== undefined)) o.visible = false;
+      if (o.isMesh && o.userData && (o.userData.isRing || o.userData.id !== undefined)) alvos.push(o);
     });
+    alvos.forEach(o => o.parent && o.parent.remove(o));
+    return alvos.length;
   });
+  console.log(`marcadores de hotspot retirados do quadro: ${n}`);
 }
 
 // A luz do capítulo faz parte do enquadramento: sem aplicá-la, um
