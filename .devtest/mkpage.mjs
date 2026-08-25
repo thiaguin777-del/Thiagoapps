@@ -64,6 +64,38 @@ window.__AURA = {
       br: +((sb - sr) / n).toFixed(1),
     };
   },
+  // Mede o quadro por FAIXAS em vez de inteiro. A média global esconde o
+  // defeito que mais dói num interior: parede estourada ao lado de móvel
+  // no breu. Um quadro com lum 90 pode ser 240 na parede e 12 no sofá —
+  // e é exatamente esse contraste que denuncia falta de bounce.
+  zones(rects){
+    if (composer && !composerFailed) composer.render(); else renderer.render(scene, camera);
+    const t = document.createElement('canvas');
+    t.width = 320; t.height = 180;
+    const x = t.getContext('2d');
+    x.drawImage(renderer.domElement, 0, 0, t.width, t.height);
+    const img = x.getImageData(0, 0, t.width, t.height).data;
+    const stat = (x0, y0, x1, y1) => {
+      let sr = 0, sg = 0, sb = 0, n = 0, mx = 0, mn = 255;
+      const ax = Math.round(x0 * t.width), bx = Math.round(x1 * t.width);
+      const ay = Math.round(y0 * t.height), by = Math.round(y1 * t.height);
+      for (let py = ay; py < by; py++) for (let px = ax; px < bx; px++) {
+        const i = (py * t.width + px) * 4;
+        const r = img[i], g = img[i+1], b = img[i+2];
+        const l = 0.2126*r + 0.7152*g + 0.0722*b;
+        sr += r; sg += g; sb += b; n++;
+        if (l > mx) mx = l; if (l < mn) mn = l;
+      }
+      return n ? {
+        lum: +((0.2126*sr + 0.7152*sg + 0.0722*sb) / n).toFixed(1),
+        max: +mx.toFixed(0), min: +mn.toFixed(0),
+        br: +((sb - sr) / n).toFixed(1),
+      } : null;
+    };
+    const out = {};
+    for (const k in rects) out[k] = stat.apply(null, rects[k]);
+    return out;
+  },
   // Aplica um conjunto de parâmetros de luz sem recarregar a página.
   tune(o){
     if (o.sunI !== undefined) LP.day.sunI = o.sunI;
@@ -75,7 +107,16 @@ window.__AURA = {
     lastEnvT = -99;
     applySolarTime(0);
   },
-  LP, M,
+  // GETTERS, não valores. Escrever "LP, M," num literal de objeto congela
+  // o que a variável valia quando o gancho foi criado — e nesse instante M
+  // ainda é o objeto vazio de antes de buildMaterials(). O gancho devolvia
+  // {} enquanto matAt(), que referencia M tarde dentro de um método, via o
+  // objeto real. Resultado: uma varredura inteira de envMapIntensity
+  // escreveu em undefined sem erro (estava sob um "if") e eu li "o IBL não
+  // afeta a parede" de um botão que nunca chegou a ser ligado.
+  get LP(){ return LP }, get M(){ return M },
+  get wash(){ return uplightUniform },
+  get indoor(){ return indoorU },
   // Identifica QUAL material está sob um ponto da tela (coordenada
   // normalizada -1..1). Serve para não diagnosticar artefato por
   // impressão: aponta-se para o defeito e o raycast diz o material.
@@ -86,16 +127,26 @@ window.__AURA = {
     for (const h of hits) {
       const o = h.object;
       if (!o.isMesh || !o.material || o.material.visible === false) continue;
+      // Mesh fundido carrega ARRAY de materiais com grupos; o material do
+      // triângulo atingido é o do grupo, não o do mesh.
+      const mats = Array.isArray(o.material) ? o.material : [o.material];
+      const mat = (h.face && o.geometry.groups && o.geometry.groups.length)
+        ? (mats[(o.geometry.groups.find(g =>
+            h.faceIndex * 3 >= g.start && h.faceIndex * 3 < g.start + g.count) || {}).materialIndex] || mats[0])
+        : mats[0];
+      if (!mat) continue;
       let nome = '?';
-      for (const k in M) if (M[k] === o.material) nome = k;
+      for (const k in M) if (M[k] === mat) nome = k;
+      const _m = mat;
       return {
         material: nome,
-        temMap: !!o.material.map,
-        temNormal: !!o.material.normalMap,
-        repeat: o.material.map ? [o.material.map.repeat.x, o.material.map.repeat.y] : null,
-        fundido: !!o.object3D || !!o.userData.merged,
+        temMap: !!_m.map,
+        rough: _m.roughness !== undefined ? +_m.roughness.toFixed(2) : null,
+        envI: _m.envMapIntensity !== undefined ? +_m.envMapIntensity.toFixed(2) : null,
+        cor: _m.color ? '#' + _m.color.getHexString() : null,
+        repeat: (_m.map && _m.map.repeat) ? [_m.map.repeat.x, _m.map.repeat.y] : null,
+        fundido: !!o.userData.merged,
         dist: +h.distance.toFixed(2),
-        uv: h.uv ? [+h.uv.x.toFixed(2), +h.uv.y.toFixed(2)] : null,
       };
     }
     return null;

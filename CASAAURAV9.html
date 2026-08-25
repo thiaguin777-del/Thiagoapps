@@ -1426,17 +1426,35 @@ function applySolarTime(t) {
 // Cada material guarda seu envMapIntensity autoral como base; o
 // heliodon multiplica essa base, então a relação entre materiais
 // (vidro reflete mais que estuque) é preservada em qualquer horário.
+//
+// Achado medindo: a cena tem 134 materiais, mas M — o registro nomeado —
+// tem 36. Os outros 98 nascem soltos dentro dos builders (luminárias,
+// vegetação, livros, quadros, relevo distante) e nunca foram registrados.
+// Iterando só Object.keys(M), 98 materiais atravessavam o dia inteiro com
+// o envMapIntensity do instante em que foram construídos: à noite ainda
+// refletiam o ambiente na intensidade de meio-dia.
+//
+// Agora a lista sai da CENA, que é onde os materiais de fato estão. O
+// custo é uma travessia única — a lista continua sendo montada uma vez só.
 let _envMats = null;
 function applyEnvIntensity(k) {
-  if (!M) return;
   if (!_envMats) {
+    const vistos = new Set();
     _envMats = [];
-    Object.keys(M).forEach((key) => {
-      const mat = M[key];
-      if (!mat || mat.envMapIntensity === undefined) return;
+    const registra = (mat) => {
+      if (!mat || vistos.has(mat.uuid) || mat.envMapIntensity === undefined) return;
+      vistos.add(mat.uuid);
       mat.userData.baseEnvI = mat.envMapIntensity;
       _envMats.push(mat);
+    };
+    scene.traverse((o) => {
+      if (!o.isMesh || !o.material) return;
+      if (Array.isArray(o.material)) o.material.forEach(registra); else registra(o.material);
     });
+    // M pode conter material que ainda não está na cena (tier medium/low
+    // troca o vidro depois); registrar os dois lados não custa nada.
+    if (M) Object.keys(M).forEach((key) => registra(M[key]));
+    if (DEBUG) console.info('envMapIntensity agendado em', _envMats.length, 'materiais');
   }
   for (let i = 0; i < _envMats.length; i++) {
     const mat = _envMats[i];
@@ -2508,6 +2526,104 @@ function applyMacroVariation(material, scale, strength, prevHook) {
         // duas oitavas incomensuráveis com o período do ladrilho
         '  float n = auraNoise(mp) * 0.62 + auraNoise(mp * 2.73) * 0.38;',
         '  diffuseColor.rgb *= 1.0 + (n - 0.5) * 2.0 * uMacroStrength;',
+        '}',
+      ].join('\n'));
+  };
+  material.needsUpdate = true;
+}
+
+// ============================================================
+// OCLUSÃO DE IBL EM AMBIENTE INTERNO
+// ------------------------------------------------------------
+// O defeito, medido: numa sala fechada a parede lia 185 e o sofá 45 —
+// razão de 4:1 dentro do mesmo cômodo. Desligar scene.environment
+// derrubava a parede em 142, ou seja, 77% do brilho dela vinha do IBL.
+//
+// A causa não é a parede: é que o mapa de ambiente NÃO TEM OCLUSÃO. Cada
+// fragmento amostra o hemisfério inteiro do céu, esteja ele na fachada ou
+// no fundo de um quarto sem janela. Um teto de gesso a 3 m do chão, dentro
+// da casa, recebia a mesma irradiância de céu que a laje da cobertura.
+//
+// Eu vinha corrigindo isso material a material — primeiro a parede, depois
+// o tapete, depois o piso do quarto — e a cada render aparecia a próxima
+// superfície com o mesmo sintoma. Era whack-a-mole: a causa é geométrica e
+// vale para TODA superfície interna, então a correção tem de ser geométrica.
+//
+// GTAO resolve contato (centímetros). Isto resolve a escala do cômodo:
+// dentro do envelope da casa, a contribuição do céu cai para uma fração,
+// voltando a subir perto do vidro — que é por onde o céu de fato entra.
+// É o mesmo princípio de um volume de sondas de interior num motor de
+// jogo, com o volume escrito à mão em vez de baked.
+//
+// Os limites ficam no EIXO da parede, não na face: a transição de 10 cm
+// cai dentro dos 22 cm de espessura, então a face interna lê 1 e a
+// externa lê 0 sem que uma vaze na outra.
+// ============================================================
+const indoorU = {
+  lo: { value: [new THREE.Vector3(-11.1, 0.06, -6.1), new THREE.Vector3(-13.1, 3.58, -4.9)] },
+  hi: { value: [new THREE.Vector3(12.1, 3.30, 6.0), new THREE.Vector3(-4.3, 6.58, 4.9)] },
+  // plano de vidro de cada volume: é dele que o céu entra de verdade
+  glassZ: { value: [6.0, 4.9] },
+  // quanto do céu sobra no fundo do cômodo (calibrado por medição)
+  min: { value: 0.30 },
+};
+
+function applyIndoorOcclusion(material, prevHook) {
+  if (!material || !material.isMeshStandardMaterial) return;
+  if (material.userData.__indoor) return;      // idempotente
+  material.userData.__indoor = true;
+  // NÃO chama ensureOwnProgramKey aqui, de propósito. Aquela chave existe
+  // porque three.js guarda o objeto `shader` junto com o programa: dois
+  // materiais que compartilham programa compartilham também as uniforms
+  // injetadas, e o segundo renderiza com os valores do primeiro. Isso só
+  // é um problema quando as uniforms são POR MATERIAL (vento, variação
+  // macro, wash) — e essas funções já pedem chave própria.
+  //
+  // Aqui todas as uniforms são o mesmo objeto indoorU compartilhado, então
+  // compartilhar programa é correto. Forçar chave própria custou caro e foi
+  // medido: 81 -> 211 programas compilados só por chamar a função à toa.
+  const prev = prevHook || material.onBeforeCompile;
+  material.onBeforeCompile = (shader) => {
+    if (prev) prev(shader);
+    // Uniforms COMPARTILHADOS entre todos os materiais: um único write
+    // move a casa inteira, e a varredura de calibração fica barata.
+    shader.uniforms.uIndoorLo = indoorU.lo;
+    shader.uniforms.uIndoorHi = indoorU.hi;
+    shader.uniforms.uIndoorGlassZ = indoorU.glassZ;
+    shader.uniforms.uIndoorMin = indoorU.min;
+
+    shader.vertexShader = 'varying vec3 vIndoorWPos;\n' + shader.vertexShader.replace(
+      '#include <begin_vertex>',
+      '#include <begin_vertex>\n  vIndoorWPos = (modelMatrix * vec4(transformed, 1.0)).xyz;');
+
+    shader.fragmentShader = [
+      'uniform vec3 uIndoorLo[2];',
+      'uniform vec3 uIndoorHi[2];',
+      'uniform float uIndoorGlassZ[2];',
+      'uniform float uIndoorMin;',
+      'varying vec3 vIndoorWPos;',
+      'float auraBoxIn(vec3 p, vec3 lo, vec3 hi){',
+      '  vec3 s = smoothstep(lo, lo + vec3(0.10), p) * (vec3(1.0) - smoothstep(hi - vec3(0.10), hi, p));',
+      '  return s.x * s.y * s.z;',
+      '}',
+      'float auraIndoorK(vec3 p){',
+      '  float k = 1.0;',
+      '  for (int i = 0; i < 2; i++) {',
+      '    float ins = auraBoxIn(p, uIndoorLo[i], uIndoorHi[i]);',
+      // perto do vidro o céu entra de verdade: volta para 1 nos ~4 m finais
+      '    float win = smoothstep(uIndoorGlassZ[i] - 4.6, uIndoorGlassZ[i] - 0.3, p.z);',
+      '    k = min(k, mix(1.0, mix(uIndoorMin, 1.0, win), ins));',
+      '  }',
+      '  return k;',
+      '}',
+    ].join('\n') + '\n' + shader.fragmentShader.replace(
+      '#include <lights_fragment_maps>',
+      [
+        '#include <lights_fragment_maps>',
+        '{',
+        '  float auraK = auraIndoorK(vIndoorWPos);',
+        '  iblIrradiance *= auraK;',
+        '  radiance *= auraK;',
         '}',
       ].join('\n'));
   };
@@ -4278,53 +4394,63 @@ function createMonitor() {
 }
 
 // --- Iluminação indireta linear (cove) — luz com função, não point light solta ---
-function createCoveLight(len, color) {
+//
+// ACHADO RENDERIZANDO: de dia, os quatro coves apareciam como uma RISCA
+// BRANCA DURA atravessando a parede. Não era brilho: de dia s.lamp é 0 e
+// emissiveIntensity também, então a fita não estava acesa. Era só uma
+// barra branca de 3 cm exposta na parede, iluminada como qualquer objeto.
+// Ler aquilo como "bloom exagerado" teria levado a mexer no bloom, que
+// não tinha nada a ver.
+//
+// O erro é de modelagem, não de luz: cove de verdade fica DENTRO de um
+// rasgo, atrás de uma testeira. Ninguém vê o diodo — vê o degradê que ele
+// joga na parede. Agora a geometria é a do detalhe construtivo:
+//
+//        parede
+//        |
+//        |####  <- fita, recuada e virada para cima
+//        |    \
+//        |     ] testeira: esconde a fita de quem está no ambiente
+//
+function createCoveLight(len, color, fasciaMat) {
   const g = new THREE.Group();
-  const strip = rbox(len, 0.03, 0.05, new THREE.MeshStandardMaterial({
+  const stripMat = new THREE.MeshStandardMaterial({
     color: 0xfff1d8, emissive: 0xffdca8, emissiveIntensity: 0.0, roughness: 0.9,
-  }), false);
+    // A fita não pode reagir ao céu: era isso que a deixava branca de dia.
+    // Ela só existe visualmente quando está acesa.
+    envMapIntensity: 0.0,
+  });
+  const strip = rbox(len, 0.02, 0.03, stripMat, false);
+  strip.position.set(0, 0, -0.035);
   g.add(strip);
-  g.userData.strip = strip.material;
+  g.userData.strip = stripMat;
+
+  // Testeira: 9 cm de aba na frente e abaixo da fita. É ela que faz a luz
+  // sair só para cima e que tapa o diodo na altura do olho.
+  const fascia = rbox(len, 0.09, 0.022, fasciaMat || M.estuque, false);
+  fascia.position.set(0, -0.012, 0.028);
+  fascia.receiveShadow = true;
+  g.add(fascia);
+
+  // Fundo do rasgo, para o vão não vazar para dentro da parede.
+  const back = rbox(len, 0.11, 0.02, fasciaMat || M.estuque, false);
+  back.position.set(0, 0.005, -0.062);
+  g.add(back);
+
   // Antes: uma PointLight a cada 2,2 m de cove — sozinhas somavam mais de
   // uma dezena de luzes. Agora a fita emissiva faz o trabalho visual e no
-  // máximo UMA luz real é criada, se houver orçamento.
-  addFixture(g, [0, -0.06, 0], color || 0xffd9a8, g.userData.strip, Math.max(4, len * 0.7));
+  // máximo UMA luz real é criada, se houver orçamento. A luz sobe (+y),
+  // que é para onde o rasgo aponta.
+  addFixture(g, [0, 0.10, -0.03], color || 0xffd9a8, stripMat, Math.max(4, len * 0.7));
   return g;
 }
 
-// --- Vegetação em camadas: gramínea (primeiro plano) e arbusto (meio) ---
-function createGrassTuft(scale) {
-  const g = new THREE.Group();
-  const s = scale || 1;
-  const mat = Math.random() > 0.5 ? M.copaArvore : M.copaArvore2;
-  for (let i = 0; i < 7; i++) {
-    const bh = (0.32 + Math.random() * 0.3) * s;
-    const blade = rbox(0.02 * s, bh, 0.02 * s, mat, false);
-    const a = Math.random() * Math.PI * 2;
-    blade.position.set(Math.cos(a) * 0.07 * s, bh / 2, Math.sin(a) * 0.07 * s);
-    blade.rotation.z = (Math.random() - 0.5) * 0.5;
-    blade.rotation.x = (Math.random() - 0.5) * 0.5;
-    g.add(blade);
-  }
-  return g;
-}
-
-function createShrub(scale) {
-  const s = scale || 1;
-  const mat = Math.random() > 0.5 ? M.copaArvore : M.copaArvore2;
-  const g = new THREE.Group();
-  const lobes = 2 + Math.floor(Math.random() * 2);
-  for (let i = 0; i < lobes; i++) {
-    const r = (0.28 + Math.random() * 0.18) * s;
-    const m = new THREE.Mesh(new THREE.IcosahedronGeometry(r, 0), mat);
-    m.position.set((Math.random() - 0.5) * 0.3 * s, r * 0.75, (Math.random() - 0.5) * 0.3 * s);
-    m.scale.set(1, 0.78, 1);
-    m.rotation.set(Math.random() * 3, Math.random() * 3, Math.random() * 3);
-    m.castShadow = true; m.receiveShadow = true;
-    g.add(m);
-  }
-  return g;
-}
+// createGrassTuft() e createShrub() viviam aqui: tufos de caixas e lobos
+// de icosaedro, um Group por planta. Foram substituídos por emitGrassTuft()
+// e emitShrub(), que empurram cartões de folha com alphaTest para dentro de
+// um buffer instanciado — mesma leitura visual, sem centenas de draw calls.
+// As versões antigas ficaram para trás sem nenhuma chamada; em arquivo
+// único, código morto é peso que o usuário baixa.
 
 // ============================================================
 // INTERIOR
@@ -5494,6 +5620,13 @@ async function buildScene(onProgress) {
     ['Piscina & Deck', buildPoolAndDeck],
     ['Paisagismo', buildLandscaping],
     ['Terreno', buildGround],
+    // buildDistantLandscape estava escrita, comentada e completa — e nunca
+    // era chamada. Foi encontrada procurando função sem nenhuma referência
+    // além da própria definição. Ou seja: o relevo distante e a massa de
+    // mata do horizonte, feitos justamente para a casa parar de parecer um
+    // objeto sobre uma mesa, nunca chegaram à cena. Nenhum erro no console
+    // denuncia isso — só olhar o horizonte, ou contar as referências.
+    ['Paisagem Distante', buildDistantLandscape],
   ];
 
   houseGroup = new THREE.Group();
@@ -5528,6 +5661,28 @@ async function buildScene(onProgress) {
   builtGroups.forEach(([name, grp]) => { mergedSaved += mergeStaticByMaterial(grp, name); });
   if (upperMass) mergedSaved += mergeStaticByMaterial(upperMass, 'Volume Superior');
   if (DEBUG) console.info('Fusão estática: -' + mergedSaved + ' draw calls no total');
+
+  // Oclusão de IBL de interior — aplicada percorrendo a CENA, não o
+  // registro M. São 134 materiais na cena contra 36 em M; iterar M
+  // deixaria de fora justamente os materiais anônimos criados dentro dos
+  // builders, que é onde estão tapete, estofado, luminária e livro — as
+  // superfícies internas que mais denunciavam o problema.
+  {
+    let n = 0;
+    const vistos = new Set();
+    scene.traverse((o) => {
+      if (!o.isMesh || !o.material) return;
+      const ms = Array.isArray(o.material) ? o.material : [o.material];
+      ms.forEach((m) => {
+        if (!m || vistos.has(m.uuid)) return;
+        vistos.add(m.uuid);
+        if (!m.isMeshStandardMaterial) return;
+        applyIndoorOcclusion(m);
+        n++;
+      });
+    });
+    if (DEBUG) console.info('Oclusão de interior aplicada em', n, 'materiais');
+  }
 
   BuildTrace.start('chapters-hotspots');
   BuildTrace.complete('chapters-hotspots');
