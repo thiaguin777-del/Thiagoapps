@@ -34,10 +34,6 @@ aparelhos. Qualquer número de fps neste documento seria inventado.
 | Programas (ultra) | 93 | 93 | 0% |
 | Programas (high) | 86 | 62 | −28% |
 | Programas (low) | 58 | 58 | 0% |
-
-Draw calls medidos com `probe.mjs`, mesma câmera do "antes", para a
-comparação ser maçã com maçã. Na câmera do capítulo 1, com os marcadores
-de hotspot fora do quadro, o número é 297.
 | Materiais distintos na cena | 136 | 110 | −19% |
 | Geometrias | 237 | 151 | −36% |
 | Meshes opacos estáticos | 170 | 107 | −37% |
@@ -50,6 +46,17 @@ de hotspot fora do quadro, o número é 297.
 | Tamanho do entregável | 320 KB + CDN | 1103 KB (442 KB gzip), autocontido | |
 | Espera pelo payload opcional | até 10 s | até 2 s | caminho crítico |
 | Reação a queda de fps | 24fps × 3 s | 45fps × 2 s | |
+
+Draw calls medidos com `probe.mjs`, mesma câmera do "antes", para a
+comparação ser maçã com maçã. Na câmera do capítulo 1, com os marcadores
+de hotspot fora do quadro, o número é 297 — é o que aparece nos logs da
+bateria, e não é contradição.
+
+O contador de programas do ultra não se moveu, e isso é honesto: o bloom
+do ultra traz variantes próprias, e a redução de materiais que ajudou o
+high (86 → 62) foi compensada por elas. Quem ganhou foi o tier que roda em
+máquina de trabalho, não o de aparelho fraco — o de aparelho fraco já
+estava em 58.
 
 Tempo de carregamento em WiFi e 4G **não está medido** — depende da rede e
 do servidor, e este ambiente não tem nem um nem outro representativos. O
