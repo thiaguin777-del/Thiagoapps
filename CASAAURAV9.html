@@ -1294,10 +1294,10 @@ function setupLighting() {
 // do dia. Sem isso o céu noturno continuava iluminando a casa como se
 // fosse meio-dia, porque envMapIntensity é constante por material.
 const LP = {
-  day:    { bg: 0x87CEEB, fog: 0xdbe7ef, fogD: 0.00330, sunC: 0xfff5e6, sunI: 5.00, hemiSky: 0xcfe2f2, hemiGnd: 0xa8906c, hemiI: 0.30, amb: 0.05, exp: 0.875, envI: 1.05, indoorFill: 0.15, pool: 0.0,  lamp: 0.0,  glassGlow: 0.00, waterGlow: 0.00 },
-  golden: { bg: 0xE8A971, fog: 0xf0cfa8, fogD: 0.00400, sunC: 0xffb066, sunI: 3.20, hemiSky: 0xffcc88, hemiGnd: 0x9c7550, hemiI: 0.28, amb: 0.05, exp: 0.86, envI: 0.82, indoorFill: 0.30, pool: 1.15,  lamp: 0.6,  glassGlow: 0.06, waterGlow: 0.05 },
-  blue:   { bg: 0x2a4a78, fog: 0x35527c, fogD: 0.00300, sunC: 0x7fa0d8, sunI: 0.45, hemiSky: 0x4a72b0, hemiGnd: 0x3a3830, hemiI: 0.36, amb: 0.11, exp: 0.98, envI: 0.80, indoorFill: 1.20, pool: 1.6,  lamp: 1.0,  glassGlow: 0.09, waterGlow: 0.15 },
-  night:  { bg: 0x2b3d63, fog: 0x1b2740, fogD: 0.00340, sunC: 0x33446a, sunI: 0.09, hemiSky: 0x44578a, hemiGnd: 0x1a1712, hemiI: 0.85, amb: 0.18, exp: 1.05, envI: 0.91, indoorFill: 2.40, pool: 1.7,  lamp: 1.6,  glassGlow: 0.10, waterGlow: 0.22 },
+  day:    { bg: 0x87CEEB, fog: 0xdbe7ef, fogD: 0.00330, sunC: 0xfff5e6, sunI: 5.00, hemiSky: 0xcfe2f2, hemiGnd: 0xa8906c, hemiI: 0.30, amb: 0.05, exp: 1.10, envI: 1.05, indoorFill: 0.15, pool: 0.0,  lamp: 0.0,  glassGlow: 0.00, waterGlow: 0.00 },
+  golden: { bg: 0xE8A971, fog: 0xf0cfa8, fogD: 0.00400, sunC: 0xffb066, sunI: 3.20, hemiSky: 0xffcc88, hemiGnd: 0x9c7550, hemiI: 0.28, amb: 0.05, exp: 1.08, envI: 0.82, indoorFill: 0.30, pool: 1.15,  lamp: 0.6,  glassGlow: 0.06, waterGlow: 0.05 },
+  blue:   { bg: 0x2a4a78, fog: 0x35527c, fogD: 0.00300, sunC: 0x7fa0d8, sunI: 0.45, hemiSky: 0x4a72b0, hemiGnd: 0x3a3830, hemiI: 0.36, amb: 0.11, exp: 1.23, envI: 0.80, indoorFill: 1.20, pool: 1.6,  lamp: 1.0,  glassGlow: 0.09, waterGlow: 0.15 },
+  night:  { bg: 0x2b3d63, fog: 0x1b2740, fogD: 0.00340, sunC: 0x33446a, sunI: 0.09, hemiSky: 0x44578a, hemiGnd: 0x1a1712, hemiI: 0.85, amb: 0.18, exp: 1.32, envI: 0.91, indoorFill: 2.40, pool: 1.7,  lamp: 1.6,  glassGlow: 0.10, waterGlow: 0.22 },
 };
 
 // ============================================================
@@ -1487,6 +1487,11 @@ function applySolarTime(t) {
   // Balizadores de fachada acendem junto com o resto da casa.
   uplightUniform.value = s.lamp * 1.30;
   renderer.toneMappingExposure = s.exp;
+  // A exposicao real vai pelo grade: com o composer no caminho, o
+  // toneMappingExposure do renderer nao chega a tela (ver a nota longa em
+  // ColorGradeShader). A linha acima fica porque o tier 'low' renderiza
+  // SEM composer e depende dela.
+  if (gradePass) gradePass.uniforms.exposure.value = s.exp;
   poolLight.intensity = s.pool;
   // WOW #3 — Acendimento escalonado ao anoitecer.
   // Todas as luminárias subindo juntas denuncia que é um único slider.
@@ -1676,14 +1681,52 @@ const VignetteShader = {
     'gl_FragColor=vec4(mix(tex.rgb,color,v*intensity),tex.a); }'
   ].join('\n')
 };
+// ============================================================
+// COLOR GRADE — e o lugar onde o TONE MAPPING passou a acontecer
+// ------------------------------------------------------------
+// ACHADO MEDINDO, e é o defeito de imagem mais grave desta base:
+//
+//   renderer.toneMapping = ACESFilmicToneMapping   (configurado)
+//   desligar o tone mapping por completo           -> imagem IDÊNTICA
+//   renderer.toneMappingExposure de 0,86 para 0,20 -> imagem IDÊNTICA
+//   as mesmas duas trocas com renderPass direto na tela -> FUNCIONAM
+//
+// Quando o EffectComposer entra no caminho, a cena é renderizada para um
+// render target e o Three.js só aplica tone mapping e conversão de espaço
+// de cor na saída PARA A TELA. O alvo intermediário guarda valor linear, e
+// nada no resto da cadeia mapeia isso de volta. O que chega ao monitor é
+// linear CEIFADO em 1,0 — não tone-mapeado.
+//
+// O sintoma: 66,8% do canal vermelho da bancada estourado na golden hour,
+// realce sem rolloff, e a paleta inteira empurrada para a saturação. E o
+// agendamento de exposição das quatro paradas atmosféricas (0,875 / 0,86 /
+// 0,98 / 1,05) nunca fez efeito nenhum em ultra, high e medium — só em
+// low, que é o único tier sem composer.
+//
+// Passei a sessão anterior calibrando LUZ contra um pipeline que ceifava.
+// Cada vez que uma parede "estourava", o que eu via era a falta do
+// rolloff, e eu respondia baixando a fonte.
+//
+// A correção é fazer o que o composer deixou de fazer, no último ponto
+// onde a imagem ainda é linear: exposição, depois ACES, e só então o
+// grade — que agora opera em 0..1, como um grade deve operar.
+// ============================================================
 const ColorGradeShader = {
   uniforms: { tDiffuse: { value: null }, saturation: { value: 1.08 }, contrast: { value: 1.05 },
-              warmth: { value: 0.3 }, lift: { value: 0.012 } },
+              warmth: { value: 0.3 }, lift: { value: 0.012 }, exposure: { value: 1.0 } },
   vertexShader: VignetteShader.vertexShader,
   fragmentShader: [
     'uniform sampler2D tDiffuse; uniform float saturation; uniform float contrast;',
-    'uniform float warmth; uniform float lift; varying vec2 vUv;',
+    'uniform float warmth; uniform float lift; uniform float exposure; varying vec2 vUv;',
     'void main(){ vec3 c=texture2D(tDiffuse,vUv).rgb;',
+    // exposição sobre o valor LINEAR, que é o único ponto em que ela
+    // significa "quanta luz entrou"
+    'c *= exposure;',
+    // ACES aproximado (Narkowicz 2015) — a mesma curva que o Three.js
+    // aplicaria se o composer não estivesse no meio. É ela que faz o
+    // realce ROLAR para o branco em vez de bater no teto.
+    'c = clamp((c*(2.51*c+0.03))/(c*(2.43*c+0.59)+0.14), 0.0, 1.0);',
+    // daqui para baixo c está em 0..1 e o grade opera como sempre operou
     'c = c + lift*(1.0-c);',
     'c = (c-0.5)*contrast+0.5;',
     'float l=dot(c,vec3(0.299,0.587,0.114)); c=mix(vec3(l),c,saturation);',
@@ -5512,8 +5555,14 @@ function buildLandscaping() {
     [7.3, -16.0, 11.7, -7.0],     // garagem e acesso
     [-11.7, -10.05, 12.3, -8.75], // canteiro do muro frontal
   ];
-  const emAreaProibida = (px, pz) => areasProibidas.some(
-    ([x0, z0, x1, z1]) => px > x0 && px < x1 && pz > z0 && pz < z1);
+  // A margem existe por causa da COPA. O teste sem margem só rejeita o
+  // tronco; uma árvore plantada rente à parede, com copa de 1,85 m de
+  // raio, joga folha para dentro do ambiente do mesmo jeito.
+  const emAreaProibida = (px, pz, margem) => {
+    const m = margem || 0;
+    return areasProibidas.some(
+      ([x0, z0, x1, z1]) => px > x0 - m && px < x1 + m && pz > z0 - m && pz < z1 + m);
+  };
 
   // ---- MACIÇOS ARBÓREOS ----
   // Mais maciços e mais fundos que antes: o lote precisa ter vizinhança
@@ -5540,6 +5589,12 @@ function buildLandscaping() {
       const r = gr.spread * (0.35 + Math.random() * 0.65);
       const x = gr.cx + Math.cos(a) * r, z = gr.cz + Math.sin(a) * r;
       if (blocksAnyCamera(x, z, 1.5)) continue;   // não planta na frente da câmera
+      // ACHADO RENDERIZANDO a sala: uma árvore inteira — tronco, galhos e
+      // copa — crescendo dentro do ambiente e atravessando o forro. O
+      // teste de área proibida já existia e já incluía a pegada da casa;
+      // os laços de ARBUSTO e de GRAMÍNEA o chamavam, e o de ÁRVORE não.
+      // O objeto maior era o único sem verificação.
+      if (emAreaProibida(x, z, 2.0)) continue;
       // Espécie majoritária por maciço, com exemplares de outra espécie
       // misturados: maciço 100% homogêneo lê como carimbo repetido.
       const sp = Math.random() < 0.72 ? gr.sp : Math.floor(Math.random() * 3);
@@ -5560,6 +5615,7 @@ function buildLandscaping() {
     [-15.2, 2.0, 0], [14.8, 9.5, 1], [-6.0, 19.0, 2], [19.5, 12.0, 0],
   ].forEach(([x, z, sp]) => {
     if (blocksAnyCamera(x, z, 1.2)) return;
+    if (emAreaProibida(x, z, 2.2)) return;
     emitTree(canopyLists[sp], trunkT, x, z, {
       trunkH: 3.4 + Math.random() * 1.4, canopyR: 1.6 + Math.random() * 0.6,
       cards: CARDS + 4, branches: 4,
