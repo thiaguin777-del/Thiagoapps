@@ -461,6 +461,13 @@ let envRT = null;
 let rectLights = [];
 let Assets = null;
 let audioSys = null;
+// Ganho da calota de solo do mapa de ambiente. Ver a nota longa no ponto
+// onde o PMREM e gerado: o rebote de solo tem de escalar com a luz do ceu.
+// 2,2 saiu de varredura: com a calota finalmente dentro do frustum, o
+// desvio B-R da parede em sombra vai de +24,9 (ganho 0) a -30 (ganho 3,6),
+// cruzando o neutro perto de 1,8. 2,2 deixa a sombra levemente QUENTE, que
+// e como o olho espera rebote de solo — e nao azul, que era o defeito.
+const envGroundGain = { value: 2.2 };
 let sky = null, skyNightFade = null, skyNightColor = null, skyPMREM = null, envScene = null, envGround = null, envDirty = false, lastEnvT = -99;
 let waterObj = null;
 let composer = null, gradePass = null, grainPass = null, bloomPass = null, gtaoPass = null, composerFailed = false;
@@ -955,8 +962,25 @@ async function init() {
   // solo. A calota é uma meia-esfera virada para dentro, com material
   // básico (não recebe luz — ela É a luz que o solo devolve).
   envScene = new THREE.Scene();
+  // RAIO 50, E ISSO É O QUE FAZ A CALOTA EXISTIR.
+  //
+  // Ela tinha raio 4000 e NUNCA ENTROU no mapa de ambiente. PMREMGenerator
+  // .fromScene(scene, sigma, near, far) tem far = 100 por padrão: a calota
+  // estava inteira fora do frustum e era descartada, silenciosamente. O
+  // céu continuava aparecendo porque o shader do Sky força a profundidade
+  // para o plano distante, então ele é sempre desenhado.
+  //
+  // Ou seja: a correção de "IBL sem rebote de solo", registrada como
+  // resolvida, na prática nunca chegou a rodar — e as superfícies em
+  // sombra seguiram lendo azuis, com desvio B−R de +20 a +29 nas paredes
+  // da chegada, que são quase 100% IBL.
+  //
+  // Encontrado varrendo o ganho da calota de 1 a 10 e vendo a parede não
+  // se mexer um único nível (184,2 -> 184,3). Botão desligado, de novo.
+  // O raio de uma calota usada só para gerar IBL é arbitrário: o que
+  // importa é ela caber no frustum e envolver a origem.
   envGround = new THREE.Mesh(
-    new THREE.SphereGeometry(4000, 16, 8, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2),
+    new THREE.SphereGeometry(50, 16, 8, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2),
     new THREE.MeshBasicMaterial({ color: 0x8a7f6a, side: THREE.BackSide, fog: false })
   );
   envScene.add(envGround);
@@ -1228,10 +1252,10 @@ function setupLighting() {
 // do dia. Sem isso o céu noturno continuava iluminando a casa como se
 // fosse meio-dia, porque envMapIntensity é constante por material.
 const LP = {
-  day:    { bg: 0x87CEEB, fog: 0xdbe7ef, fogD: 0.00330, sunC: 0xfff5e6, sunI: 5.00, hemiSky: 0xcfe2f2, hemiGnd: 0xa8906c, hemiI: 0.30, amb: 0.05, exp: 0.875, envI: 0.60, indoorFill: 0.15, pool: 0.0,  lamp: 0.0,  glassGlow: 0.00, waterGlow: 0.00 },
-  golden: { bg: 0xE8A971, fog: 0xf0cfa8, fogD: 0.00400, sunC: 0xffb066, sunI: 3.20, hemiSky: 0xffcc88, hemiGnd: 0x9c7550, hemiI: 0.28, amb: 0.05, exp: 0.86, envI: 0.47, indoorFill: 0.30, pool: 1.15,  lamp: 0.6,  glassGlow: 0.06, waterGlow: 0.05 },
-  blue:   { bg: 0x2a4a78, fog: 0x35527c, fogD: 0.00300, sunC: 0x7fa0d8, sunI: 0.45, hemiSky: 0x4a72b0, hemiGnd: 0x3a3830, hemiI: 0.36, amb: 0.11, exp: 0.98, envI: 0.46, indoorFill: 1.20, pool: 1.6,  lamp: 1.0,  glassGlow: 0.09, waterGlow: 0.15 },
-  night:  { bg: 0x2b3d63, fog: 0x1b2740, fogD: 0.00340, sunC: 0x33446a, sunI: 0.09, hemiSky: 0x44578a, hemiGnd: 0x1a1712, hemiI: 0.85, amb: 0.18, exp: 1.05, envI: 0.52, indoorFill: 2.40, pool: 1.7,  lamp: 1.6,  glassGlow: 0.10, waterGlow: 0.22 },
+  day:    { bg: 0x87CEEB, fog: 0xdbe7ef, fogD: 0.00330, sunC: 0xfff5e6, sunI: 5.00, hemiSky: 0xcfe2f2, hemiGnd: 0xa8906c, hemiI: 0.30, amb: 0.05, exp: 0.875, envI: 1.05, indoorFill: 0.15, pool: 0.0,  lamp: 0.0,  glassGlow: 0.00, waterGlow: 0.00 },
+  golden: { bg: 0xE8A971, fog: 0xf0cfa8, fogD: 0.00400, sunC: 0xffb066, sunI: 3.20, hemiSky: 0xffcc88, hemiGnd: 0x9c7550, hemiI: 0.28, amb: 0.05, exp: 0.86, envI: 0.82, indoorFill: 0.30, pool: 1.15,  lamp: 0.6,  glassGlow: 0.06, waterGlow: 0.05 },
+  blue:   { bg: 0x2a4a78, fog: 0x35527c, fogD: 0.00300, sunC: 0x7fa0d8, sunI: 0.45, hemiSky: 0x4a72b0, hemiGnd: 0x3a3830, hemiI: 0.36, amb: 0.11, exp: 0.98, envI: 0.80, indoorFill: 1.20, pool: 1.6,  lamp: 1.0,  glassGlow: 0.09, waterGlow: 0.15 },
+  night:  { bg: 0x2b3d63, fog: 0x1b2740, fogD: 0.00340, sunC: 0x33446a, sunI: 0.09, hemiSky: 0x44578a, hemiGnd: 0x1a1712, hemiI: 0.85, amb: 0.18, exp: 1.05, envI: 0.91, indoorFill: 2.40, pool: 1.7,  lamp: 1.6,  glassGlow: 0.10, waterGlow: 0.22 },
 };
 
 // ============================================================
@@ -2699,7 +2723,7 @@ const indoorU = {
   // 5,0 o terreno já lê 68,5 com envI em 0,45 (lia 45 antes). Então envI
   // voltou para 0,60, as paredes desestouraram, e o terreno ficou onde
   // estava. Céu de meio-dia não é o que ilumina um dia de sol.
-  min: { value: 0.227 },
+  min: { value: 0.130 },
   // ------------------------------------------------------------
   // O QUE ENTRA NO LUGAR DO CÉU
   // Tirar a irradiância do céu e não repor nada deixou toda superfície
@@ -6811,9 +6835,27 @@ function animate() {
       // com a cor de solo da parada atmosférica atual, incluída só na
       // geração do mapa — não aparece na cena.
       // ------------------------------------------------------------
+      // O GANHO DA CALOTA — segunda rodada, medida.
+      //
+      // A calota existia e mesmo assim as paredes em sombra continuavam
+      // frias: na "Chegada", desvio B−R de +20,7 e +29,2, enquanto o resto
+      // da cena lia quente (−16 a −20). Aquelas paredes são quase 100%
+      // IBL, então o desvio delas É o desvio do mapa de ambiente.
+      //
+      // A causa é de unidade, não de cor. A abóbada do Preetham é HDR e
+      // chega a valores bem acima de 1,0 perto do horizonte; a calota era
+      // um MeshBasicMaterial com uma cor sRGB, ou seja, teto 1,0. O
+      // hemisfério inferior entrava ordens de grandeza mais fraco que o
+      // superior, e a parede vertical — que integra metade de cada —
+      // acabava lendo só o céu.
+      //
+      // Rebote de solo no mundo real é ILUMINÂNCIA DO CÉU vezes albedo do
+      // solo: quanto mais claro o dia, mais forte o rebote. Por isso o
+      // ganho multiplica a cor em espaço linear em vez de trocá-la.
       const skyParent = sky.parent;
       envScene.add(sky);
-      envGround.material.color.copy(solarStateAt(solarTime).hemiGnd);
+      envGround.material.color.copy(solarStateAt(solarTime).hemiGnd)
+        .multiplyScalar(envGroundGain.value);
       envRT = skyPMREM.fromScene(envScene);
       if (skyParent) skyParent.add(sky);
 

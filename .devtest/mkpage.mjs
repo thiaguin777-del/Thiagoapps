@@ -117,6 +117,12 @@ window.__AURA = {
   get LP(){ return LP }, get M(){ return M },
   get wash(){ return uplightUniform },
   get indoor(){ return indoorU },
+  get envGain(){ return envGroundGain },
+  get envGround(){ return envGround },
+  get envRT(){ return envRT },
+  // forca a regeneracao do PMREM: o mapa so e refeito quando o sol anda,
+  // entao varrer o ganho da calota sem isto nao mudaria nada.
+  regenEnv(){ envDirty = true; },
   // Identifica QUAL material está sob um ponto da tela (coordenada
   // normalizada -1..1). Serve para não diagnosticar artefato por
   // impressão: aponta-se para o defeito e o raycast diz o material.
