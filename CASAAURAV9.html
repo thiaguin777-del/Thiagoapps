@@ -2171,10 +2171,16 @@ function buildMaterials() {
       // neutro, com um resto de verde-acinzentado, e quem dá a cor é o
       // que ele REFLETE (céu, vegetação) — não um filtro azul no material.
       // Daí o color quase neutro + envMapIntensity mais alto.
-      color: 0xd6dedb, roughness: 0.045, metalness: 0,
-      transmission: 0.82, thickness: 0.02, ior: 1.52,
+      // AJUSTADO renderizando: com envMapIntensity 0,75 e roughness
+      // 0,045 o pano de vidro virava um espelho de ceu saturado — a casa
+      // lia como bloco ciano de longe. Vidro arquitetonico real tem um
+      // microrrelevo que espalha um pouco o reflexo; roughness um pouco
+      // maior e reflexo mais fraco entregam a mesma leitura sem a cor
+      // chapada.
+      color: 0xe4e8e6, roughness: 0.075, metalness: 0,
+      transmission: 0.85, thickness: 0.02, ior: 1.52,
       transparent: false, opacity: 1.0, side: THREE.DoubleSide,
-      envMapIntensity: 0.75,
+      envMapIntensity: 0.55,
       emissive: 0x000000, emissiveIntensity: 0,
     }),
     // ÁGUA — reconstruída.
