@@ -2262,7 +2262,15 @@ function buildMaterials() {
       normalMap: (() => { const t = noiseNormalTexture(14, 0.8); t.repeat.set(1, 1); return t; })(),
       normalScale: new THREE.Vector2(0.24, 0.24),
       roughness: 0.72, metalness: 0 }),
-    revestPiscina:new THREE.MeshStandardMaterial({ color: 0x63b3bf, roughness: 0.3, metalness: 0, envMapIntensity: 0.4 }),
+    // O casco e uma CAVIDADE: o GTAO escurece o interior dela (o que esta
+    // correto) e o sol rasante nao alcanca o fundo. Somado a absorcao da
+    // agua, a piscina saia verde-petroleo escura no render. Um emissivo
+    // baixo devolve o que na agua real e espalhamento interno da luz —
+    // e o que mantem piscina de revestimento claro luminosa mesmo com o
+    // sol baixo. Nao e brilho: 0,3 apenas impede a cavidade de fechar.
+    revestPiscina:new THREE.MeshStandardMaterial({
+      color: 0x74c0ca, roughness: 0.28, metalness: 0, envMapIntensity: 0.55,
+      emissive: 0x2b7c8a, emissiveIntensity: 0.3 }),
     vaso:         new THREE.MeshStandardMaterial({ color: 0xd8d2c6, roughness: 0.8, metalness: 0 }),
     terraco:      new THREE.MeshStandardMaterial({ map: paverTexture('#ded2bd', '#a99a83', 4), roughness: 0.5, metalness: 0 }),
     caminho:      new THREE.MeshStandardMaterial({ map: paverTexture('#c9beac', '#8f8272', 2), roughness: 0.6, metalness: 0 }),

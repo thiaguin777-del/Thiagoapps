@@ -65,16 +65,23 @@ await page.evaluate(() => {
   });
 });
 
+// A luz do capítulo faz parte do enquadramento: sem aplicá-la, um
+// capítulo 'night' era renderizado com a luz de dia — foi assim que uma
+// cena noturna apareceu clara e levou a um diagnóstico errado do céu.
 const chapterShots = await page.evaluate(() =>
   window.__AURA.CONFIG.chapters.map((c, i) => [
     'ch' + String(i).padStart(2, '0') + '-' + (c.title || 'x').toLowerCase().normalize('NFD').replace(/[^a-z0-9]+/g, '-'),
-    c.cam.pos, c.cam.look,
+    c.cam.pos, c.cam.look, c.light || 'day',
   ]));
 const SHOTS = [...chapterShots, ...EXTRA];
 
-for (const [name, pos, look] of SHOTS) {
+for (const [name, pos, look, light] of SHOTS) {
   if (ONLY && !ONLY.some(k => name.includes(k))) continue;
-  await page.evaluate(([p, l]) => window.__AURA.shot(p, l), [pos, look]);
+  await page.evaluate(([p, l, lz]) => {
+    if (lz) window.__AURA.setLightMode(lz, 0.001);
+    window.__AURA.shot(p, l);
+  }, [pos, look, light || null]);
+  await page.waitForTimeout(400);   // deixa o heliodon assentar
   await page.waitForTimeout(700); // deixa a água/env estabilizar
   const stats = await page.evaluate(() => window.__AURA.stats());
   await page.screenshot({ path: `${OUT}/${name}.png`, timeout: 180000, animations: 'disabled' });
