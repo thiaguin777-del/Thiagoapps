@@ -1,18 +1,12 @@
-# Ambiente de teste visual. Só os scripts do harness são versionados;
-# o resto é reproduzível com `npm i three@0.160.0` dentro de .devtest.
-.devtest/node_modules/
+# Ambiente de teste visual.
+# Versionados: só os scripts do harness na raiz de .devtest/.
+# Ignorado: TODA subpasta — node_modules (reproduzível com
+# `npm i three@0.160.0`) e as saídas de render do shoot.mjs, que ganham
+# nome novo a cada rodada.
+#
+# Cuidado: a versão anterior deste arquivo tinha `!.devtest/node_modules/`,
+# uma negação que reincluía justamente o que a linha acima excluía — e
+# 976 arquivos de dependência entraram na árvore por isso.
+.devtest/*/
 .devtest/package-lock.json
 .devtest/index.html
-# saídas de render (qualquer pasta criada por shoot.mjs)
-.devtest/shots*/
-.devtest/after*/
-.devtest/q-high/
-.devtest/merge1/
-.devtest/v2/
-.devtest/final*/
-.devtest/horiz/
-.devtest/entrega*/
-.devtest/piscina*/
-.devtest/noite*/
-.devtest/crepusculo/
-.devtest/verif/
