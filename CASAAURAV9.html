@@ -461,7 +461,7 @@ let envRT = null;
 let rectLights = [];
 let Assets = null;
 let audioSys = null;
-let sky = null, skyPMREM = null, envScene = null, envGround = null, envDirty = false, lastEnvT = -99;
+let sky = null, skyNightFade = null, skyPMREM = null, envScene = null, envGround = null, envDirty = false, lastEnvT = -99;
 let waterObj = null;
 let composer = null, gradePass = null, grainPass = null, bloomPass = null, gtaoPass = null, composerFailed = false;
 let currentChapter = 0;
@@ -885,6 +885,29 @@ async function init() {
   // ============================================================
   sky = new Sky();
   sky.scale.setScalar(45000);
+
+  // ------------------------------------------------------------
+  // ESCURECIMENTO DO CÉU À NOITE
+  // ENCONTRADO renderizando o capítulo "Visão Final" (luz 'night'): a
+  // cena lia como fim de tarde, não como noite — o céu continuava cinza
+  // claro atrás de uma casa já iluminada por dentro.
+  //
+  // Causa: o modelo de Preetham do Sky.js não trata sol ABAIXO do
+  // horizonte. Com o sol em -10° ele continua devolvendo um céu de
+  // crepúsculo claro, por mais que se mexa em turbidez e rayleigh.
+  //
+  // Correção: um multiplicador no fim do shader do céu, controlado pelo
+  // heliodon. Não é truque de cor — é o mesmo papel que a atmosfera faz,
+  // aplicado onde o modelo analítico deixa de valer.
+  // ------------------------------------------------------------
+  skyNightFade = { value: 1 };
+  sky.material.onBeforeCompile = (sh) => {
+    sh.uniforms.uSkyFade = skyNightFade;
+    sh.fragmentShader = 'uniform float uSkyFade;\n' + sh.fragmentShader.replace(
+      'gl_FragColor = vec4( retColor, 1.0 );',
+      'gl_FragColor = vec4( retColor * uSkyFade, 1.0 );');
+  };
+  sky.material.needsUpdate = true;
   scene.add(sky);
 
   skyPMREM = new THREE.PMREMGenerator(renderer);
@@ -1261,6 +1284,14 @@ function applySolarTime(t) {
     u.rayleigh.value = 0.9 + solarTime * 2.6;
     u.mieCoefficient.value = 0.004 + solarTime * 0.010;
     u.mieDirectionalG.value = 0.80 - solarTime * 0.15;
+    // Curva de escurecimento: intacta até a golden hour, cai forte da
+    // blue hour em diante. Os expoentes seguem a queda real de luz do
+    // crepúsculo, que é muito mais rápida do que a intuição sugere.
+    if (skyNightFade) {
+      const t = solarTime;
+      skyNightFade.value = t < 0.55 ? 1.0
+        : Math.max(0.035, Math.pow(1.0 - (t - 0.55) / 0.45, 2.2));
+    }
   }
   // A água é MeshPhysicalMaterial (ver buildPoolAndDeck): escurece e
   // esfria ao anoitecer em vez de trocar uniform de shader.
