@@ -207,13 +207,43 @@ o código não substitui olhar a imagem.
 | Grama dentro da piscina | câmera da piscina | o sorteio de tufos era radial e não conhecia o que havia no terreno |
 | 1 MB baixado à toa | leitura do arquivo | GLB embutidos decodificados em todo carregamento, mas descartados sem `?models=1` |
 | 34 requisições 404 por carga | console do teste | a pasta `assets/` opcional era sondada arquivo a arquivo |
+| **Luz de janela iluminando para fora** | varredura medida: subir a intensidade de 3,4 → 400 mudava a panorâmica externa (119,9 → 140,7) e **não mexia** o interior (129,3 → 129,2) | `RectAreaLight` emite no **−Z local**; o `rotation.y = π` virava a emissão para o jardim. A luz de vão envidraçado nunca chegou ao interior — daí os ambientes frios |
+| Noite lendo como fim de tarde | capítulo "Visão Final" | o modelo de Preetham do `Sky.js` não trata sol **abaixo** do horizonte e continua devolvendo céu claro |
 
 ## 8. Se for continuar
 
-**Modelagem 3D.** Não há Blender nem SketchUp neste ambiente. Os GLB em
-`assets/models/*.glb` foram modelados no Blender 4.0 numa sessão
-anterior e estão prontos para reabrir. Para trocar o procedural por eles
-de forma permanente, edite `A.model()` em `createAssetSystem()`.
+**Modelagem 3D.** Não há Blender. Há um **SketchUp via MCP**, e ele
+funciona: constrói geometria por Python e salva `.skp`. O interpretador
+não tem filesystem, mas dá para trazer a geometria de volta pelo `result`
+em JSON — testado e funcionando:
+
+```python
+def extrair(entities):
+    saida = []
+    for f in entities.get_faces():
+        n = f.get_normal()
+        pos = [[v.get_position().x, v.get_position().y, v.get_position().z]
+               for v in f.get_outer_loop().get_vertices()]
+        for k in range(1, len(pos) - 1):              # leque de triângulos
+            saida.append({"v": [pos[0], pos[k], pos[k+1]],
+                          "n": [n.x, n.y, n.z]})
+    return saida
+result = {"tris": extrair(grupo.get_entities())}      # unidades: POLEGADAS
+```
+
+Regra ao usar: traga **só a geometria** e aplique os materiais do
+projeto. Foi exatamente isso que derrubou a tentativa anterior com
+Blender — os GLB chegaram com materiais próprios e destoaram da cena, e
+por isso ficaram desligados atrás de `?models=1`. Eles seguem em
+`assets/models/*.glb`, prontos para reabrir.
+
+Antes de investir nisso, note o que a auditoria mostrou: este MCP entrega
+`GeometryInput`/`LoopInput`, ou seja, você triangulariza à mão de
+qualquer jeito. Para peças de revolução ou perfil varrido,
+`LatheGeometry` e `ExtrudeGeometry` no próprio projeto dão o mesmo
+resultado sem malha importada — foi assim que a espreguiçadeira foi
+refeita. SketchUp compensa para formas que realmente exigem construção
+manual complexa, não para móveis paramétricos.
 
 **Texturas PBR externas.** `ASSET_MANIFEST.textures` já define os nomes
 de arquivo esperados em `assets/textures/`. Basta colocar os arquivos:
