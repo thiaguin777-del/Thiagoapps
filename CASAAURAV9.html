@@ -2878,6 +2878,53 @@ function waterRippleTexture() {
   return tex;
 }
 
+// Manta de cobertura.
+//
+// ACHADO RENDERIZANDO a panorâmica: a laje de cobertura ocupa quase um
+// terço do quadro visto de cima e era uma cor chapada (#2e2e32, sem mapa
+// nenhum). Sem textura e sem escala, ela não lia como superfície — lia
+// como buraco preto recortado no meio da casa.
+//
+// Cobertura plana de verdade é manta asfáltica ou PVC em ROLOS, com
+// emenda a cada metro e meio e sujeira acumulada entre elas. A emenda é o
+// que dá escala; a sujeira é o que tira o aspecto de plástico novo.
+// A emenda cai na borda do ladrilho, então ladrilha sem costura por
+// construção: com TILE_M = 1,6 m, sai um rolo de 1,6 m, que é a largura
+// real de um rolo.
+function roofMembraneTexture(baseHex) {
+  const tex = makeCanvasTexture(256, (ctx, s) => {
+    ctx.fillStyle = baseHex;
+    ctx.fillRect(0, 0, s, s);
+    // manchas largas de envelhecimento
+    for (let i = 0; i < 14; i++) {
+      const cx = Math.random() * s, cy = Math.random() * s;
+      const r = s * (0.10 + Math.random() * 0.22);
+      const claro = Math.random() > 0.5;
+      wrapDraw(ctx, s, cx, cy, r, () => {
+        const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
+        g.addColorStop(0, claro ? 'rgba(255,255,255,0.055)' : 'rgba(0,0,0,0.075)');
+        g.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx.fillStyle = g;
+        ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
+      });
+    }
+    // emenda do rolo: uma sombra fina e um lábio claro logo ao lado
+    ctx.fillStyle = 'rgba(0,0,0,0.30)';
+    ctx.fillRect(0, 0, s, 2);
+    ctx.fillStyle = 'rgba(255,255,255,0.05)';
+    ctx.fillRect(0, 2, s, 1.5);
+    // grão fino, para a manta não ficar plástica
+    const img = ctx.getImageData(0, 0, s, s);
+    for (let i = 0; i < img.data.length; i += 4) {
+      const n = (Math.random() - 0.5) * 11;
+      img.data[i] += n; img.data[i + 1] += n; img.data[i + 2] += n;
+    }
+    ctx.putImageData(img, 0, 0);
+  });
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  return tex;
+}
+
 function stuccoNoiseTexture(baseHex) {
   const tex = makeCanvasTexture(256, (ctx, s) => {
     ctx.fillStyle = baseHex;
@@ -2926,7 +2973,14 @@ function buildMaterials() {
       normalMap: (() => { const t = noiseNormalTexture(10, 0.8); t.repeat.set(1, 1); return t; })(),
       normalScale: new THREE.Vector2(0.2, 0.2),
       roughness: 0.88, metalness: 0 }),
-    grafite:      new THREE.MeshStandardMaterial({ color: 0x2e2e32, roughness: 0.45, metalness: 0.15 }),
+    grafite:      new THREE.MeshStandardMaterial({
+      map: roofMembraneTexture('#34343a'),
+      normalMap: (() => { const t = noiseNormalTexture(18, 0.9); t.repeat.set(2, 2); return t; })(),
+      normalScale: new THREE.Vector2(0.35, 0.35),
+      // Um pouco de brilho é o que faz a cobertura receber o degradê do
+      // céu em vez de morrer em preto: manta escura lisa reflete, e é
+      // esse reflexo que dá volume à laje vista de cima.
+      roughness: 0.52, metalness: 0.12 }),
     cumaru:       new THREE.MeshStandardMaterial({
       map: woodGrainTexture('#76583e', '#3f2c1a', 1, 1, { highRes: true, planks: 5 }),
       roughnessMap: woodRoughnessMap(1, 1, true), roughness: 0.62, metalness: 0.02 }),
@@ -3101,6 +3155,13 @@ function buildMaterials() {
     //    Transparência simples entrega a mesma leitura mais barato.
     // 3. roughness/clearcoat plausíveis para água parada de piscina,
     //    não para um espelho.
+    // Granito de jardim: cinza, fosco, com relevo proprio. Nao pode ser
+    // M.stoneCore — aquele e revestimento com fiada de 1,6 m desenhada.
+    pedraJardim: new THREE.MeshStandardMaterial({
+      color: 0x8b8880,
+      normalMap: (() => { const t = noiseNormalTexture(22, 1.7); t.repeat.set(2, 2); return t; })(),
+      normalScale: new THREE.Vector2(0.85, 0.85),
+      roughness: 0.93, metalness: 0, envMapIntensity: 0.5 }),
     agua: new THREE.MeshPhysicalMaterial({
       color: 0x3f9aad,
       roughness: 0.09, metalness: 0,
@@ -3509,6 +3570,36 @@ function rbox(w, h, d, mat, castShadow) {
   m.receiveShadow = true;
   m.userData.maxDim = Math.max(w, h, d);
   return m;
+}
+
+// Matacão de jardim.
+//
+// ACHADO RENDERIZANDO o capítulo "Paisagismo": as pedras decorativas eram
+// IcosahedronGeometry(1, 0) — o sólido platônico cru, 20 faces — vestido
+// com M.stoneCore, que é o revestimento de pedra da casa, com fiada e
+// junta desenhadas para ladrilho de 1,6 m. Numa pedra de 50 cm aquilo dava
+// um cristal branco facetado: lia como gema de jogo, não como matacão.
+//
+// Pedra de verdade não tem face plana nem aresta reta. Duas subdivisões
+// mais deslocamento por direção resolvem a silhueta, e três senóides
+// incomensuráveis garantem que nenhuma pedra fique igual à outra sem
+// precisar de ruído tabelado.
+function boulderGeometry(seed) {
+  const g = new THREE.IcosahedronGeometry(1, 2);
+  const pos = g.attributes.position;
+  const v = new THREE.Vector3();
+  for (let i = 0; i < pos.count; i++) {
+    v.fromBufferAttribute(pos, i);
+    const n = v.clone().normalize();
+    const d = Math.sin(n.x * 3.1 + seed) * 0.10
+            + Math.sin(n.y * 4.7 + seed * 1.7) * 0.075
+            + Math.sin(n.z * 6.3 + seed * 2.3) * 0.055;
+    v.multiplyScalar(1 + d);
+    pos.setXYZ(i, v.x, v.y, v.z);
+  }
+  pos.needsUpdate = true;
+  g.computeVertexNormals();
+  return g;
 }
 
 // Perfil torneado real (LatheGeometry) para vasos, cúpulas e bases —
@@ -5409,7 +5500,6 @@ function buildLandscaping() {
   // Cartão de folha = 1 quad. Um PlaneGeometry unitário compartilhado
   // por todos: copas, arbustos e gramíneas usam a mesma geometria.
   const unitCard = new THREE.PlaneGeometry(1, 1);
-  const unitIcoLow = new THREE.IcosahedronGeometry(1, 0);
 
   // vento: gramínea balança mais que arbusto, que balança mais que copa
   applyWind(M.copaArvore, 0.05);
@@ -5435,9 +5525,12 @@ function buildLandscaping() {
   const imGrass = buildInstanced(unitCard, M.graminea, grassT, false);
   if (imGrass) g.add(imGrass);
 
-  // Pedras decorativas (poucas, mantidas como meshes normais)
-  for (const [rx, rz, rs] of [[-13.0, 6.4, 0.5], [-11.6, 7.0, 0.32], [13.6, -1.5, 0.45], [12.4, 6.2, 0.38]]) {
-    const rock = new THREE.Mesh(unitIcoLow, M.stoneCore);
+  // Pedras decorativas (poucas, mantidas como meshes normais).
+  // Cada uma com semente propria: quatro copias identicas do mesmo matacao
+  // denunciariam a repeticao tanto quanto o icosaedro denunciava a origem.
+  for (const [rx, rz, rs, seed] of [[-13.0, 6.4, 0.5, 1.7], [-11.6, 7.0, 0.32, 4.2],
+                                    [13.6, -1.5, 0.45, 8.9], [12.4, 6.2, 0.38, 12.4]]) {
+    const rock = new THREE.Mesh(boulderGeometry(seed), M.pedraJardim);
     rock.position.set(rx, rs * 0.45, rz);
     rock.rotation.set(Math.random() * 3, Math.random() * 3, Math.random() * 3);
     rock.scale.set(rs, rs * 0.65, rs);

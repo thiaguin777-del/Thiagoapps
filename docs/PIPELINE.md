@@ -54,12 +54,25 @@ Escolhidos por `Quality.init()` a partir de `deviceMemory`,
 `hardwareConcurrency` e user agent; rebaixados em tempo real se o FPS
 ficar abaixo de 24 por 3 segundos seguidos.
 
-| Tier | DPR | Sombras | Vidro | Água | Pós-processamento |
-|---|---|---|---|---|---|
-| ultra | ≤2 | 2048 | transmission | Water.js 512 | GTAO + Bloom + grade |
-| high | ≤1.75 | 1024 | transmission | Water.js 256 | GTAO + grade |
-| medium | ≤1.5 | 512 | opaco/alpha | material simples | grade |
-| low | 1 | off | opaco/alpha | material simples | nenhum |
+| Tier | DPR | Sombras | Vidro | Pós-processamento |
+|---|---|---|---|---|
+| ultra | ≤2 | 2048 | transmission | GTAO + Bloom + grade |
+| high | ≤1.75 | 1024 | transmission | GTAO + grade |
+| medium | ≤1.5 | 512 | opaco/alpha | grade |
+| low | 1 | off | opaco/alpha | nenhum |
+
+**A coluna "Água" saiu da tabela porque estava errada.** Ela dizia
+"Water.js 512 / Water.js 256" nos tiers altos; a cena não usa Water.js em
+tier nenhum — a lâmina é um `MeshPhysicalMaterial` transparente
+(`opacity: 0.45`) com ondulação por normal map animado, igual nos quatro
+tiers. A troca foi uma decisão deliberada de uma sessão anterior, com o
+raciocínio registrado no código junto da construção da piscina: em ângulo
+rasante o Fresnel faz a reflexão planar dominar e a lâmina vira chapa de
+céu, e o Water.js não refrata o fundo — some o revestimento, o desnível e
+os degraus, que são justamente o que vende uma piscina. Só que a tabela
+nunca foi atualizada, e por alguns minutos eu tratei "a água não é
+Water.js" como defeito. Documentação que contradiz o código custa tempo
+igual a bug.
 
 Medido nos quatro tiers, com `probe.mjs` (autoteste estrutural sem falhas
 em todos, nenhuma etapa de build quebrada, composer ativo onde existe):
