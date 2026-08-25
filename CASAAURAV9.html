@@ -1228,10 +1228,10 @@ function setupLighting() {
 // do dia. Sem isso o céu noturno continuava iluminando a casa como se
 // fosse meio-dia, porque envMapIntensity é constante por material.
 const LP = {
-  day:    { bg: 0x87CEEB, fog: 0xdbe7ef, fogD: 0.00330, sunC: 0xfff5e6, sunI: 5.00, hemiSky: 0xcfe2f2, hemiGnd: 0xa8906c, hemiI: 0.30, amb: 0.05, exp: 0.875, envI: 0.85, pool: 0.0,  lamp: 0.0,  glassGlow: 0.00, waterGlow: 0.00 },
-  golden: { bg: 0xE8A971, fog: 0xf0cfa8, fogD: 0.00400, sunC: 0xffb066, sunI: 3.20, hemiSky: 0xffcc88, hemiGnd: 0x9c7550, hemiI: 0.28, amb: 0.05, exp: 0.86, envI: 0.66, pool: 1.15,  lamp: 0.6,  glassGlow: 0.06, waterGlow: 0.05 },
-  blue:   { bg: 0x2a4a78, fog: 0x35527c, fogD: 0.00300, sunC: 0x7fa0d8, sunI: 0.45, hemiSky: 0x4a72b0, hemiGnd: 0x3a3830, hemiI: 0.36, amb: 0.11, exp: 0.98, envI: 0.46, pool: 1.6,  lamp: 1.0,  glassGlow: 0.09, waterGlow: 0.15 },
-  night:  { bg: 0x2b3d63, fog: 0x1b2740, fogD: 0.00340, sunC: 0x33446a, sunI: 0.09, hemiSky: 0x44578a, hemiGnd: 0x1a1712, hemiI: 0.85, amb: 0.18, exp: 1.05, envI: 0.52, pool: 1.7,  lamp: 1.6,  glassGlow: 0.10, waterGlow: 0.22 },
+  day:    { bg: 0x87CEEB, fog: 0xdbe7ef, fogD: 0.00330, sunC: 0xfff5e6, sunI: 5.00, hemiSky: 0xcfe2f2, hemiGnd: 0xa8906c, hemiI: 0.30, amb: 0.05, exp: 0.875, envI: 0.85, indoorFill: 0.15, pool: 0.0,  lamp: 0.0,  glassGlow: 0.00, waterGlow: 0.00 },
+  golden: { bg: 0xE8A971, fog: 0xf0cfa8, fogD: 0.00400, sunC: 0xffb066, sunI: 3.20, hemiSky: 0xffcc88, hemiGnd: 0x9c7550, hemiI: 0.28, amb: 0.05, exp: 0.86, envI: 0.66, indoorFill: 0.30, pool: 1.15,  lamp: 0.6,  glassGlow: 0.06, waterGlow: 0.05 },
+  blue:   { bg: 0x2a4a78, fog: 0x35527c, fogD: 0.00300, sunC: 0x7fa0d8, sunI: 0.45, hemiSky: 0x4a72b0, hemiGnd: 0x3a3830, hemiI: 0.36, amb: 0.11, exp: 0.98, envI: 0.46, indoorFill: 1.20, pool: 1.6,  lamp: 1.0,  glassGlow: 0.09, waterGlow: 0.15 },
+  night:  { bg: 0x2b3d63, fog: 0x1b2740, fogD: 0.00340, sunC: 0x33446a, sunI: 0.09, hemiSky: 0x44578a, hemiGnd: 0x1a1712, hemiI: 0.85, amb: 0.18, exp: 1.05, envI: 0.52, indoorFill: 2.40, pool: 1.7,  lamp: 1.6,  glassGlow: 0.10, waterGlow: 0.22 },
 };
 
 // ============================================================
@@ -1333,6 +1333,7 @@ function solarStateAt(t) {
     amb: _lerp(A.amb, B.amb, f),
     exp: _lerp(A.exp, B.exp, f),
     envI: _lerp(A.envI, B.envI, f),
+    indoorFill: _lerp(A.indoorFill, B.indoorFill, f),
     pool: _lerp(A.pool, B.pool, f),
     lamp: _lerp(A.lamp, B.lamp, f),
     glassGlow: _lerp(A.glassGlow, B.glassGlow, f),
@@ -1402,6 +1403,11 @@ function applySolarTime(t) {
   // preenchendo a casa com a mesma força do meio-dia — a razão de a
   // cena noturna nunca ficar realmente escura.
   applyEnvIntensity(s.envI);
+  // O rebote de interior sobe com a noite: de dia ele repoe o pouco de
+  // ceu que a mascara tirou; a noite ele E a luz do comodo — o rebote das
+  // paredes claras sob as luminarias, que nenhuma das 8 point lights do
+  // orcamento consegue fazer sozinha.
+  indoorU.fill.value = s.indoorFill;
   // A piscina acende junto com a casa. Ao entardecer o sol rasante já não
   // alcança o fundo da bacia e a lâmina fecharia em preto — e piscina
   // preta no capítulo que existe para vender a piscina é o oposto do
