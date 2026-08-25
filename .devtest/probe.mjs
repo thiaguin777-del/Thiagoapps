@@ -49,14 +49,13 @@ const out = await page.evaluate(() => {
 // Sonda de material: pontos suspeitos na captura da chegada.
 const matSonda = await page.evaluate(() => {
   const A = window.__AURA;
-  A.shot([14.8, 3.0, -13], [9.5, 1.7, -6.5]);
+  A.shot([-5.6, 1.7, 16.5], [-5.6, 0.9, 9.0]);
   const pts = {
-    'parede-esq':      [-0.62,  0.10],
-    'parede-ondulada': [-0.30, -0.05],
-    'parede-dir':      [ 0.40,  0.05],
-    'piso-entrada':    [-0.05, -0.55],
-    'nucleo-pedra':    [ 0.55,  0.62],
-    'porta':           [ 0.02, -0.10],
+    'branco-perto':  [-0.10, -0.75],
+    'branco-medio':  [ 0.05, -0.40],
+    'branco-longe':  [ 0.00, -0.18],
+    'tufo-grama':    [-0.08, -0.30],
+    'faixa-verde':   [-0.55, -0.14],
   };
   const out = {};
   for (const k in pts) out[k] = A.matAt(pts[k][0], pts[k][1]);

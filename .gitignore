@@ -1,8 +1,8 @@
-# Ambiente de teste visual (three.js local, página gerada, renders brutos).
-# Só os scripts do harness são versionados; o resto é reproduzível com
-# `npm i three@0.160.0` dentro de .devtest.
+# Ambiente de teste visual. Só os scripts do harness são versionados;
+# o resto é reproduzível com `npm i three@0.160.0` dentro de .devtest.
 .devtest/node_modules/
 .devtest/package-lock.json
 .devtest/index.html
-.devtest/after*/
-.devtest/shots*/
+# saídas de render (qualquer pasta criada por shoot.mjs)
+.devtest/*/
+!.devtest/node_modules/

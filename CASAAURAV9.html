@@ -3975,6 +3975,17 @@ function buildLandscaping() {
   // (só que menos), nunca volta a ser um cone.
   const CARDS = Quality.level === 'low' ? 11 : Quality.level === 'medium' ? 15 : 22;
 
+  const areasProibidas = [
+    [-12.1, 5.95, 2.9, 14.45],    // deck da piscina (inclui a lâmina)
+    [-13.4, -6.4, 12.4, 6.3],     // pegada da casa
+    [-11.9, 6.0, 12.5, 8.0],      // terraço sul em travertino
+    [5.75, -9.7, 13.25, -6.5],    // entrada e faixa de cascalho
+    [7.3, -16.0, 11.7, -7.0],     // garagem e acesso
+    [-11.7, -10.05, 12.3, -8.75], // canteiro do muro frontal
+  ];
+  const emAreaProibida = (px, pz) => areasProibidas.some(
+    ([x0, z0, x1, z1]) => px > x0 && px < x1 && pz > z0 && pz < z1);
+
   // ---- MACIÇOS ARBÓREOS ----
   // Mais maciços e mais fundos que antes: o lote precisa ter vizinhança
   // arborizada, senão a casa fica num campo aberto e some a privacidade,
@@ -4040,6 +4051,7 @@ function buildLandscaping() {
     }
   });
   shrubSpots.forEach(([sx, sz]) => {
+    if (emAreaProibida(sx, sz)) return;
     if (blocksAnyCamera(sx, sz, 0.7)) return;
     emitShrub(shrubT, sx, sz, 0.85 + Math.random() * 0.6);
   });
@@ -4058,20 +4070,22 @@ function buildLandscaping() {
       const cz = l.z0 + (l.z1 - l.z0) * f + (Math.random() - 0.5) * 0.6;
       // touceira = alguns tufos próximos, não uma moita única
       for (let b = 0; b < 3; b++) {
-        emitGrassTuft(grassT,
-          cx + (Math.random() - 0.5) * 0.55,
-          cz + (Math.random() - 0.5) * 0.55,
-          0.9 + Math.random() * 0.5);
+        const bx = cx + (Math.random() - 0.5) * 0.55;
+        const bz = cz + (Math.random() - 0.5) * 0.55;
+        if (emAreaProibida(bx, bz)) continue;
+        emitGrassTuft(grassT, bx, bz, 0.9 + Math.random() * 0.5);
       }
     }
   });
 
   // Tufos esparsos quebrando a borda entre gramado e pavimentação —
   // grama que encosta no piso em linha reta perfeita denuncia CGI.
-  for (let i = 0; i < 90; i++) {
+  //
+  for (let i = 0; i < 130; i++) {
     const a = Math.random() * Math.PI * 2;
-    const rr = 9 + Math.random() * 16;
+    const rr = 9 + Math.random() * 18;
     const tx = Math.cos(a) * rr, tz = 4 + Math.sin(a) * rr;
+    if (emAreaProibida(tx, tz)) continue;
     if (blocksAnyCamera(tx, tz, 0.6)) continue;
     emitGrassTuft(grassT, tx, tz, 0.55 + Math.random() * 0.45);
   }
@@ -4134,11 +4148,31 @@ function buildPoolAndDeck() {
   const poolCx = -5.6, poolCz = 10.4;
   const waterY = 0.02;
 
-  // Borda: pedra em faixa estreita, alinhada ao deck (linguagem
-  // contemporânea = borda mínima, não moldura grossa)
-  const coping = box(poolW + 0.44, 0.12, poolD + 0.44, M.bordaPiscina);
-  coping.position.set(poolCx, 0.06, poolCz);
-  g.add(coping);
+  // ------------------------------------------------------------
+  // BUG CORRIGIDO — a piscina não tinha água visível
+  // Localizado por raycast (matAt) na câmera do capítulo "Piscina": o
+  // que aparecia onde deveria estar a lâmina d'água era o material
+  // `bordaPiscina`. A borda era UMA LAJE MACIÇA de 10,64 x 5,44 m
+  // cobrindo a piscina inteira (box(poolW+0.44, 0.12, poolD+0.44)
+  // centrado em poolCx/poolCz), com o topo em y=0,12 — e a água em
+  // y=0,03, ou seja, 9 cm ABAIXO dela. A piscina inteira, o Water.js
+  // com reflexão planar, os degraus submersos e o desnível do fundo
+  // estavam escondidos embaixo de uma tampa de pedra.
+  //
+  // Agora a borda é o que o comentário original já dizia que era: uma
+  // moldura de quatro faixas estreitas em volta do espelho d'água.
+  // ------------------------------------------------------------
+  const copingW = 0.34;   // largura da faixa
+  [
+    [poolW + copingW * 2, copingW, poolCx, poolCz - poolD / 2 - copingW / 2],   // norte
+    [poolW + copingW * 2, copingW, poolCx, poolCz + poolD / 2 + copingW / 2],   // sul
+    [copingW, poolD, poolCx - poolW / 2 - copingW / 2, poolCz],                 // oeste
+    [copingW, poolD, poolCx + poolW / 2 + copingW / 2, poolCz],                 // leste
+  ].forEach(([cw, cd, ccx, ccz]) => {
+    const faixa = box(cw, 0.12, cd, M.bordaPiscina);
+    faixa.position.set(ccx, 0.06, ccz);
+    g.add(faixa);
+  });
 
   // Casco com PROFUNDIDADE REAL: fundo raso na ponta oeste descendo
   // para fundo profundo na leste. Antes era uma caixa de altura única,
