@@ -567,7 +567,10 @@ function createAssetSystem() {
         (t) => {
           t.wrapS = t.wrapT = THREE.RepeatWrapping;
           if (repeat) t.repeat.set(repeat[0], repeat[1]);
-          if (srgb) t.colorSpace = THREE.SRGBColorSpace;
+          // Mesma regra do bug do deck espelhado: mapa de COR é sRGB,
+          // mapa de DADO (normal, rugosidade) é linear. Explícito nos
+          // dois casos para não depender do padrão do loader.
+          t.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace;
           t.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
           A.loaded.textures++;
           resolve(t);
@@ -1584,17 +1587,25 @@ function woodGrainTexture(baseHex, streakHex, repeatX, repeatY, opts) {
 function woodRoughnessMap(repeatX, repeatY, highRes) {
   const size = highRes ? 512 : 256;
   const tex = makeCanvasTexture(size, (ctx, s) => {
-    ctx.fillStyle = '#888888';
+    // A base era #888. Como o Three.js MULTIPLICA a rugosidade do
+    // material pelo mapa, cinza-médio corta a rugosidade pela metade —
+    // a madeira nunca chegava perto do valor autoral. Num mapa de
+    // rugosidade, branco = rugosidade cheia; o mapa serve para tirar
+    // brilho onde a superfície é mais lisa, não para dividir tudo.
+    // MEDIDO: com o mapa em #888, a região do deck saía com 5,45% de
+    // pixels estourados refletindo o céu.
+    ctx.fillStyle = '#e8e8e8';
     ctx.fillRect(0, 0, s, s);
     for (let i = 0; i < 40; i++) {
       const y = Math.random() * s, h = 1 + Math.random() * 2.5;
       ctx.globalAlpha = 0.08 + Math.random() * 0.12;
-      ctx.fillStyle = '#aaaaaa';
+      ctx.fillStyle = '#ffffff';
       ctx.fillRect(0, y, s, h);
     }
+    // nós da madeira: pontos mais lisos, e só eles
     for (let i = 0; i < 3; i++) {
       const nx = Math.random() * s, ny = Math.random() * s, nr = 8 + Math.random() * 18;
-      ctx.globalAlpha = 0.10; ctx.fillStyle = '#666666';
+      ctx.globalAlpha = 0.16; ctx.fillStyle = '#9a9a9a';
       ctx.beginPath();
       ctx.ellipse(nx, ny, nr, nr * (0.4 + Math.random() * 0.4), Math.random() * Math.PI, 0, Math.PI * 2);
       ctx.fill();
@@ -4177,13 +4188,37 @@ function buildLandscaping() {
 function buildPoolAndDeck() {
   const g = new THREE.Group();
 
-  const deck = box(15, 0.1, 8.5, M.ipe, false);
-  deck.position.set(-4.6, 0.05, 10.2);
-  g.add(deck);
-
   const poolW = 10.2, poolD = 5.0;
   const poolCx = -5.6, poolCz = 10.4;
   const waterY = 0.02;
+  const copingW = 0.34;
+
+  // ------------------------------------------------------------
+  // BUG CORRIGIDO — o deck passava POR BAIXO da piscina
+  // Só apareceu depois de abrir a bacia: o deck era uma laje inteiriça
+  // de 15 x 8,5 m, e a piscina fica DENTRO dessa pegada. Enquanto o
+  // casco era um bloco maciço até y=0,02, a laje ficava escondida. Com
+  // a bacia aberta, o que se via dentro da piscina era a madeira do
+  // deck atravessando na altura da água.
+  //
+  // O deck agora é recortado em quatro faixas em volta do conjunto
+  // piscina + borda, mantendo exatamente a mesma pegada externa.
+  // ------------------------------------------------------------
+  const deckX0 = -12.1, deckX1 = 2.9, deckZ0 = 5.95, deckZ1 = 14.45;
+  const vaoX0 = poolCx - poolW / 2 - copingW, vaoX1 = poolCx + poolW / 2 + copingW;
+  const vaoZ0 = poolCz - poolD / 2 - copingW, vaoZ1 = poolCz + poolD / 2 + copingW;
+  [
+    [deckX0, deckZ0, deckX1, vaoZ0],   // faixa norte
+    [deckX0, vaoZ1, deckX1, deckZ1],   // faixa sul
+    [deckX0, vaoZ0, vaoX0, vaoZ1],     // faixa oeste
+    [vaoX1, vaoZ0, deckX1, vaoZ1],     // faixa leste
+  ].forEach(([x0, z0, x1, z1]) => {
+    const w = x1 - x0, d = z1 - z0;
+    if (w <= 0.01 || d <= 0.01) return;
+    const faixa = box(w, 0.1, d, M.ipe, false);
+    faixa.position.set((x0 + x1) / 2, 0.05, (z0 + z1) / 2);
+    g.add(faixa);
+  });
 
   // ------------------------------------------------------------
   // BUG CORRIGIDO — a piscina não tinha água visível
@@ -4199,7 +4234,6 @@ function buildPoolAndDeck() {
   // Agora a borda é o que o comentário original já dizia que era: uma
   // moldura de quatro faixas estreitas em volta do espelho d'água.
   // ------------------------------------------------------------
-  const copingW = 0.34;   // largura da faixa
   [
     [poolW + copingW * 2, copingW, poolCx, poolCz - poolD / 2 - copingW / 2],   // norte
     [poolW + copingW * 2, copingW, poolCx, poolCz + poolD / 2 + copingW / 2],   // sul
