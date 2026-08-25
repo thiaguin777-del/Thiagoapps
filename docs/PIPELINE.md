@@ -201,6 +201,38 @@ estourados, % quase pretos e desvio de azul (B−R). Critério usado:
 
 ---
 
+## 6b. Escala de textura — a regra que custou uma rodada
+
+O gerador PBR (`heightField` → `pbrFromHeight`) deriva cor, normal,
+rugosidade e AO do mesmo campo de altura. A primeira calibração errou
+feio, e o erro vale registrar porque é contraintuitivo:
+
+**Detalhe fino demais não vira textura — vira ruído.**
+
+Com `TILE_M = 1,6 m`, uma textura de 512 px tem ~3 mm por texel. Pedir 5
+oitavas a partir de frequência 10 produz feições de ~1 cm. A 3 m de
+distância isso está abaixo do que o olho resolve *e* abaixo do que o
+mipmap consegue filtrar sem cintilar: a parede de estuque leu como lixa.
+
+A regra prática que ficou:
+
+| Superfície | Feição visível a 2-4 m | Oitavas / freq base |
+|---|---|---|
+| Reboco fino | ondulação de 20-50 cm | 3 oitavas, base 3 |
+| Travertino | poro e leito de 5-15 cm | 5 oitavas, base 3 |
+| Alvenaria | fiada de 20-40 cm | junta esculpida + 4 oitavas, base 6 |
+
+E dois valores que estouram fácil:
+
+- **rugosidade**: `roughBase - roughVar` é o piso real. Com 0,46 e 0,34 as
+  saliências caem em 0,12 e o piso vira espelho, lendo como molhado.
+- **albedo**: concreto a 0,75 estoura ao sol. Concreto real fica em
+  0,45-0,55; travertino claro em 0,7-0,8.
+
+Junta de alvenaria é caso à parte: precisa ser **escavada no campo de
+altura** (`carveCourses`), não desenhada na cor. Junta que existe só no
+albedo lê como adesivo, porque o relevo e a sombra não a acompanham.
+
 ## 7. Defeitos que só apareceram renderizando
 
 Registro do que a auditoria visual encontrou — todos invisíveis na
