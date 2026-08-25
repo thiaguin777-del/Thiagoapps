@@ -260,6 +260,99 @@ o código não substitui olhar a imagem.
 | **Luz de janela iluminando para fora** | varredura medida: subir a intensidade de 3,4 → 400 mudava a panorâmica externa (119,9 → 140,7) e **não mexia** o interior (129,3 → 129,2) | `RectAreaLight` emite no **−Z local**; o `rotation.y = π` virava a emissão para o jardim. A luz de vão envidraçado nunca chegou ao interior — daí os ambientes frios |
 | "Noite lendo como fim de tarde" | capítulo "Visão Final" | **falso positivo do harness**: o `shoot.mjs` não aplicava o `light` do capítulo, então toda cena noturna era renderizada com luz de dia |
 | Arquitetura sumindo à noite | mesma câmera, já com a luz correta | `glassGlow` em 0,32 virava painel âmbar chapado; preenchimento da parada `night` baixo demais; e o céu de Preetham colapsa para preto com o sol abaixo do horizonte |
+| **Parede interna estourada ao lado de móvel no breu** | medição por faixa (`zones()`): sala lia parede 185 / sofá 45 | o mapa de ambiente **não tem oclusão**: fragmento no fundo de um quarto amostra o mesmo hemisfério de céu que a laje da cobertura. Desligando `scene.environment`, a parede caía 142 dos 185 |
+| **Paisagem distante nunca renderizada** | contagem de referências: `buildDistantLandscape` aparecia 1× no arquivo — a própria definição | a função estava escrita e completa, e **não constava na lista de etapas** de `buildScene`. Nenhum erro no console |
+| **98 materiais fora do agendamento de ambiente** | `Object.keys(M).length` = 36 contra 134 materiais na cena | `applyEnvIntensity` iterava o registro `M`; os materiais anônimos criados dentro dos builders atravessavam o dia com o `envMapIntensity` do instante da construção |
+| **Cove como risca branca dura** | render de dia dos capítulos 4 e 6 | não era brilho — de dia `emissiveIntensity` é 0. Era uma **barra branca de 3 cm exposta** na parede, iluminada como qualquer objeto. Cove real fica dentro de um rasgo, atrás de testeira |
+| Sol não entra no interior ao meio-dia | medição do piso com/sem sol ao longo do dia | **não é defeito**: o beiral de 3,53 m avança 0,5 m além do vidro e a 56° de elevação a penetração é de ~1,4 m. Em t=0,30 (≈28°) o sol contribui +18,0 no piso |
+
+### O padrão que se repete
+
+Quatro dos defeitos acima não estavam no código que eu suspeitava, e três
+foram encontrados **contando** em vez de olhando: referências de função,
+chaves de um registro, materiais numa travessia de cena. Um render bonito
+não prova que uma etapa rodou — `buildDistantLandscape` nunca foi chamada
+durante sessões inteiras de calibração de horizonte.
+
+E duas vezes o que parecia defeito de cena era defeito de arnês:
+
+- `shoot.mjs` não aplicava o `light` do capítulo → cena noturna renderizada
+  com luz de dia → diagnóstico errado do céu;
+- o gancho expunha `M` como **valor** num literal de objeto, congelado no
+  instante da criação, quando `M` ainda era `{}`. Uma varredura inteira de
+  `envMapIntensity` escreveu em `undefined` sem erro, e eu li disso que "o
+  IBL não afeta a parede" — de um botão que nunca chegou a ser ligado.
+
+Antes de acreditar numa medição que contraria a física, **verifique se o
+botão está ligado**: mude o parâmetro para um extremo absurdo e confirme
+que a imagem muda. Se não muda, o defeito é do instrumento.
+
+## 7b. Oclusão de IBL de interior
+
+O IBL entrega irradiância de céu a qualquer fragmento, sem saber se ele
+está na fachada ou no fundo de um quarto sem janela. GTAO resolve contato
+em centímetros; nada resolvia a escala do cômodo.
+
+Eu vinha corrigindo material a material — parede, tapete, piso do quarto —
+e a cada render aparecia a próxima superfície com o mesmo sintoma. A causa
+é geométrica, então a correção passou a ser geométrica.
+
+`applyIndoorOcclusion()` injeta no fragment shader uma máscara de volume:
+
+```glsl
+float ins = auraBoxIn(p, uIndoorLo[i], uIndoorHi[i]);
+float win = smoothstep(uIndoorGlassZ[i] - 4.6, uIndoorGlassZ[i] - 0.3, p.z);
+k = min(k, mix(1.0, mix(uIndoorMin, 1.0, win), ins));
+iblIrradiance *= k;  radiance *= k;
+```
+
+Dois volumes cobrem o térreo e o pavimento superior fechado (o terraço fica
+de fora de propósito). É o mesmo princípio de um volume de sondas de
+interior num motor de jogo, com o volume escrito à mão em vez de baked.
+
+Dois detalhes que não são óbvios:
+
+1. **Os limites ficam no eixo da parede, não na face.** A transição de
+   10 cm cai dentro dos 22 cm de espessura, então a face interna lê 1 e a
+   externa lê 0. Com o limite na face, a transição vazaria para fora e a
+   fachada escureceria junto.
+2. **Não chame `ensureOwnProgramKey()` aqui.** Aquela chave existe porque o
+   Three.js guarda o objeto `shader` junto com o programa: dois materiais
+   que compartilham programa compartilham as uniforms injetadas. Isso só é
+   problema quando as uniforms são **por material**. Aqui todas são o mesmo
+   objeto `indoorU` compartilhado. Forçar chave própria custou, medido,
+   **81 → 211 programas** compilados; sem ela, 83.
+
+Resultado medido (dia, `q=high`):
+
+| faixa | antes | depois |
+|---|---|---|
+| sala — parede | 185,1 | 90,4 |
+| suíte — parede | 178,0 | 75,1 |
+| desvio B−R (todas as faixas) | +7 a +12 (azul) | negativo (quente) |
+
+O interior fica escuro depois disso, o que é esperado: a luz de céu foi
+retirada e precisa voltar pela janela — ver `RECT_K` abaixo.
+
+### `RECT_K`: por que 2,6 estava errado
+
+A calibração antiga lia a **média do quadro inteiro**. Num interior essa
+média é dominada pela parede: com a parede estourada pelo IBL, o quadro já
+chegava a 156 e qualquer luz de janela a mais empurrava a parede para o
+estouro. O sofá, a 45, nunca entrou na conta.
+
+Medindo por faixa, com a parede sob controle:
+
+| rect | sala (teto/parede/móvel/piso) | suíte |
+|---|---|---|
+| 2,6 | 23 / 87 / 39 / 25 | 22 / 75 / 33 / 13 |
+| **10** | **45 / 175 / 116 / 66** | **41 / 132 / 102 / 45** |
+| 20 | 74 / 218 / 192 / 120 | 67 / 208 / 142 / 87 |
+| 35 | 118 / 228 / 216 / 187 | 106 / 246 / 181 / 140 |
+
+A diferença entre sala e suíte é legítima — vão de 13 m contra 7,4 m — e
+se ataca abrindo a **janela lateral** (oeste e leste, que existiam na
+arquitetura e não tinham luz), não subindo a intensidade.
 
 ## 8. Se for continuar
 

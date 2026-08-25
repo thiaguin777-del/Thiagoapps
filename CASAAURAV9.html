@@ -722,10 +722,24 @@ function createAssetSystem() {
 //   1,8 -> luminância 144,1 | estouro 0,55% | desvio B-R +0,6 (neutro)
 //   3,4 -> luminância 156,9 | estouro 0,56% | desvio B-R -4,6 (quente)
 //   12  -> luminância 196,6 | estouro 32,4% | desvio B-R  -18 (estourado)
-// A resposta é muito íngreme perto do joelho do tone mapping. 2,6 fica
-// no meio da faixa útil: interior quente e convidativo, com folga larga
-// até o estouro.
-const RECT_K = 2.6;
+//
+// 2,6 saiu daquela medição e estava errado — mas o erro era da medição,
+// não do número. Ela lia a MÉDIA do quadro inteiro, e num interior a média
+// é dominada pela parede: com a parede estourada pelo IBL sem oclusão, o
+// quadro já chegava a 156 de luminância e qualquer luz de janela a mais
+// só empurrava a parede para o estouro. O sofá, a 45, nunca apareceu na
+// conta. Medindo por FAIXA (zones()), com a parede sob controle:
+//
+//   rect | sala: teto/parede/móvel/piso | suíte: idem
+//   2,6  |   23   87  39  25            |   22   75  33  13   <- o breu
+//   10   |   45  175 116  66            |   41  132 102  45
+//   20   |   74  218 192 120            |   67  208 142  87   <- parede indo
+//   35   |  118  228 216 187            |  106  246 181 140   <- chapado
+//
+// 10 é onde o móvel fica legível sem a parede encostar no estouro. A
+// diferença entre sala e suíte é legítima — vão de 13 m contra 7,4 m —
+// e é atacada abrindo a janela lateral, não subindo a intensidade.
+const RECT_K = 10;
 
 const windUniform = { value: 0 };
 function applyWind(material, amplitude) {
@@ -1109,6 +1123,22 @@ function setupLighting() {
     { w: 13.0, h: 2.8, pos: [-4.15, 1.7, 5.6], alvo: [-4.15, 1.4, -2.0] },  // fachada sul social
     { w: 7.4,  h: 2.8, pos: [8.0, 1.7, 5.6],  alvo: [8.0, 1.4, -2.0] },     // fachada sul suíte
   ];
+  // As janelas laterais oeste e leste existem na arquitetura desde sempre
+  // (westWindow e eastWindow, em buildArchitecture) e nunca tiveram luz.
+  // O resultado media-se: com uma única abertura ao sul, o fundo dos dois
+  // cômodos caía, e a suíte — vão de 7,4 m contra 13 m da social — ficava
+  // sistematicamente mais escura que a sala na mesma calibração.
+  //
+  // Duas aberturas por cômodo também é o que dá modelado: luz cruzada
+  // revela o volume dos móveis; uma fonte só achata tudo contra o fundo.
+  // Fica fora dos tiers baixos porque cada RectAreaLight custa uma
+  // avaliação LTC por fragmento.
+  if (Quality.level === 'ultra' || Quality.level === 'high') {
+    windowLights.push(
+      { w: 3.2, h: 1.6, pos: [-10.9, 1.8, -3.0], alvo: [-4.0, 1.5, -3.0] },  // janela oeste, social
+      { w: 3.2, h: 1.6, pos: [11.9, 1.8, -3.0],  alvo: [6.0, 1.5, -3.0] },   // janela leste, suíte
+    );
+  }
   windowLights.forEach(wl => {
     const rl = new THREE.RectAreaLight(0xf2ede2, 0, wl.w, wl.h);
     rl.position.set(wl.pos[0], wl.pos[1], wl.pos[2]);
