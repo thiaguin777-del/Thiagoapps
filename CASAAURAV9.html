@@ -1726,6 +1726,53 @@ function cavityField(h, size, raio) {
   return cav;
 }
 
+// Escava juntas de alvenaria NO CAMPO DE ALTURA, para que normal, AO e
+// rugosidade sigam junto — junta que existe só na cor lê como adesivo.
+// Fiadas de altura variável, juntas verticais desencontradas entre
+// fiadas: é o desencontro que faz o olho ler pedra assentada, e não
+// grade. Determinístico por `seed`, então ladrilha sem costura.
+function carveCourses(h, size, opts) {
+  opts = opts || {};
+  const fiadas = opts.courses || 7;
+  const prof = opts.depth === undefined ? 0.55 : opts.depth;
+  const juntaPx = Math.max(1, Math.round(size * (opts.jointWidth || 0.006)));
+  let seed = opts.seed || 5;
+  const rnd = () => { seed = (seed * 9301 + 49297) % 233280; return seed / 233280; };
+
+  // limites das fiadas com altura variável, fechando exatamente em size
+  const bordas = [0];
+  const pesos = [];
+  for (let i = 0; i < fiadas; i++) pesos.push(0.7 + rnd() * 0.6);
+  const soma = pesos.reduce((a, b) => a + b, 0);
+  let acc = 0;
+  for (let i = 0; i < fiadas; i++) {
+    acc += pesos[i] / soma;
+    bordas.push(Math.round(acc * size));
+  }
+
+  const cav = (i) => { h[i] = Math.max(0, h[i] - prof); };
+
+  for (let f = 0; f < fiadas; f++) {
+    const y0 = bordas[f], y1 = bordas[f + 1];
+    // junta horizontal no topo da fiada
+    for (let d = 0; d < juntaPx; d++) {
+      const y = (y0 + d) % size;
+      for (let x = 0; x < size; x++) cav(y * size + x);
+    }
+    // juntas verticais desta fiada, com deslocamento próprio
+    const nBlocos = 2 + Math.floor(rnd() * 3);
+    const off = rnd();
+    for (let b = 0; b < nBlocos; b++) {
+      const xc = Math.round(((b + off) / nBlocos) * size) % size;
+      for (let d = 0; d < juntaPx; d++) {
+        const x = (xc + d) % size;
+        for (let y = y0 + juntaPx; y < y1; y++) cav((y % size) * size + x);
+      }
+    }
+  }
+  return h;
+}
+
 function _texFromData(size, data, srgb, repeat) {
   const c = document.createElement('canvas');
   c.width = size; c.height = size;
@@ -2684,21 +2731,29 @@ function buildMaterials() {
       const leito = Math.sin((y / size) * Math.PI * 6 + alt * 2.4) * 0.5 + 0.5;
       const t = alt * 0.55 + leito * 0.45;
       return [_clamp255(214 + t * 32), _clamp255(203 + t * 30), _clamp255(184 + t * 28)];
-    }, { normalStrength: 2.4, cavityRadius: 3, roughBase: 0.46, roughVar: 0.34,
-         aoStrength: 0.85, albedoCavity: 0.34 });
-    applyPBR(M.travertino, maps, 0.85);
+      // MEDIDO no render da suíte: com roughBase 0,46 e variação 0,34 as
+      // saliências caíam em 0,12 de rugosidade — piso espelhado, lendo
+      // como molhado. Travertino polido de piso fica em torno de 0,45.
+    }, { normalStrength: 1.6, cavityRadius: 3, roughBase: 0.62, roughVar: 0.18,
+         aoStrength: 0.7, albedoCavity: 0.26 });
+    applyPBR(M.travertino, maps, 0.5);
     M.travertino.envMapIntensity = 0.35;
   }
 
   // ESTUQUE — reboco fino. Poro pequeno e denso, sem direção.
   {
-    const h = heightField(pbrSize, { octaves: 5, baseFreq: 10, persistence: 0.62, seed: 19 });
+    // CORRIGIDO renderizando: 5 oitavas a partir de frequência 10 dava
+    // detalhe de ~1 cm num ladrilho de 1,6 m. Isso está ABAIXO do que se
+    // enxerga a 3 m de distância, então não vira textura — vira ruído e
+    // aliasing, e a parede leu como lixa. Reboco fino a essa distância
+    // mostra ondulação larga e suave, não grão.
+    const h = heightField(pbrSize, { octaves: 3, baseFreq: 3, persistence: 0.5, seed: 19 });
     const maps = pbrFromHeight(pbrSize, h, (alt) => {
       const t = alt;
-      return [_clamp255(228 + t * 22), _clamp255(222 + t * 22), _clamp255(210 + t * 22)];
-    }, { normalStrength: 1.5, cavityRadius: 2, roughBase: 0.88, roughVar: 0.16,
-         aoStrength: 0.55, albedoCavity: 0.22 });
-    applyPBR(M.estuque, maps, 0.6);
+      return [_clamp255(226 + t * 16), _clamp255(220 + t * 16), _clamp255(208 + t * 15)];
+    }, { normalStrength: 0.7, cavityRadius: 3, roughBase: 0.9, roughVar: 0.08,
+         aoStrength: 0.3, albedoCavity: 0.1 });
+    applyPBR(M.estuque, maps, 0.22);
   }
 
   // CONCRETO — laje aparente. Mancha larga e poros de fôrma.
@@ -2706,24 +2761,34 @@ function buildMaterials() {
     const h = heightField(pbrSize, { octaves: 5, baseFreq: 5, persistence: 0.5, seed: 31 });
     const maps = pbrFromHeight(pbrSize, h, (alt, cav) => {
       const t = alt * 0.8 + 0.1;
-      const v = 176 + t * 34 - Math.max(0, cav) * 26;
+      // MEDIDO no render: com base 176 o albedo saía em ~0,75 e a borda
+      // da laje estourava, lendo como neve. Concreto real fica em torno
+      // de 0,45-0,55 de albedo.
+      const v = 118 + t * 26 - Math.max(0, cav) * 18;
       return [_clamp255(v), _clamp255(v * 0.995), _clamp255(v * 0.975)];
-    }, { normalStrength: 1.8, cavityRadius: 3, roughBase: 0.86, roughVar: 0.2,
-         aoStrength: 0.7, albedoCavity: 0.28 });
-    applyPBR(M.concreto, maps, 0.5);
+    }, { normalStrength: 1.1, cavityRadius: 3, roughBase: 0.9, roughVar: 0.14,
+         aoStrength: 0.6, albedoCavity: 0.22 });
+    applyPBR(M.concreto, maps, 0.35);
     M.concreto.color.setHex(0xffffff);   // a cor passa a vir do mapa
   }
 
-  // NÚCLEO EM PEDRA — elemento herói. Leito marcado e relevo forte.
+  // NÚCLEO EM PEDRA — elemento herói.
+  // CORRIGIDO renderizando: a versão com bandas senoidais lia como
+  // tecido canelado, não como pedra. Junta de alvenaria precisa estar no
+  // CAMPO DE ALTURA (para normal, AO e rugosidade acompanharem) e
+  // precisa ser irregular, com fiadas de alturas diferentes e juntas
+  // verticais desencontradas.
   {
-    const h = heightField(pbrSize, { octaves: 5, baseFreq: 4, persistence: 0.58, seed: 53 });
-    const maps = pbrFromHeight(pbrSize, h, (alt, cav, x, y, size) => {
-      const leito = Math.sin((y / size) * Math.PI * 9 + alt * 3.0) * 0.5 + 0.5;
-      const t = alt * 0.5 + leito * 0.5;
-      return [_clamp255(132 + t * 42), _clamp255(124 + t * 40), _clamp255(110 + t * 36)];
-    }, { normalStrength: 3.2, cavityRadius: 4, roughBase: 0.88, roughVar: 0.14,
-         aoStrength: 0.95, albedoCavity: 0.42 });
-    applyPBR(M.stoneCore, maps, 1.15);
+    const h = heightField(pbrSize, { octaves: 4, baseFreq: 6, persistence: 0.5, seed: 53 });
+    for (let i = 0; i < h.length; i++) h[i] = 0.45 + h[i] * 0.55;   // face do bloco
+    carveCourses(h, pbrSize, { courses: 6, depth: 0.5, jointWidth: 0.008, seed: 11 });
+    const maps = pbrFromHeight(pbrSize, h, (alt, cav) => {
+      // variação de tom BLOCO A BLOCO vem do próprio ruído da face
+      const t = alt;
+      return [_clamp255(118 + t * 58), _clamp255(112 + t * 55), _clamp255(100 + t * 50)];
+    }, { normalStrength: 3.0, cavityRadius: 3, roughBase: 0.9, roughVar: 0.1,
+         aoStrength: 1.0, albedoCavity: 0.5 });
+    applyPBR(M.stoneCore, maps, 1.0);
   }
 
   applyMacroVariation(M.estuque, 6.0, 0.055);
@@ -3272,19 +3337,41 @@ function createWallArt(w, h, toneHex) {
   const g = new THREE.Group();
   const frame = rbox(w + 0.08, h + 0.08, 0.04, M.metal);
   g.add(frame);
-  const artTex = makeCanvasTexture(128, (ctx, s) => {
-    ctx.fillStyle = toneHex || '#cfc6b4';
+  // Renderizando a suíte, o quadro saía como um retângulo amarelo
+  // estourado — lia como caixa de luz, não como arte. Obra real tem
+  // valor MÉDIO, contraste interno e uma área de respiro; e a tela é
+  // fosca, não reflete o ambiente.
+  const artTex = makeCanvasTexture(256, (ctx, s) => {
+    const base = shadeHex(toneHex || '#cfc6b4', 0.62);
+    ctx.fillStyle = base;
     ctx.fillRect(0, 0, s, s);
-    for (let i = 0; i < 4; i++) {
-      ctx.strokeStyle = shadeHex(toneHex || '#cfc6b4', 0.55 + Math.random() * 0.4);
-      ctx.lineWidth = 3 + Math.random() * 10;
+    // campo de cor inferior, mais escuro — composição em duas faixas
+    ctx.fillStyle = shadeHex(toneHex || '#cfc6b4', 0.34);
+    ctx.fillRect(0, s * 0.58, s, s * 0.42);
+    // gesto largo atravessando as duas faixas
+    ctx.globalAlpha = 0.55;
+    for (let i = 0; i < 3; i++) {
+      ctx.strokeStyle = shadeHex(toneHex || '#cfc6b4', 0.2 + Math.random() * 0.28);
+      ctx.lineWidth = 6 + Math.random() * 16;
+      ctx.lineCap = 'round';
       ctx.beginPath();
-      ctx.moveTo(Math.random() * s, 0);
-      ctx.lineTo(Math.random() * s, s);
+      const x0 = s * (0.15 + Math.random() * 0.6);
+      ctx.moveTo(x0, s * 0.12);
+      ctx.quadraticCurveTo(x0 + (Math.random() - 0.5) * s * 0.5, s * 0.5,
+                           x0 + (Math.random() - 0.5) * s * 0.4, s * 0.9);
       ctx.stroke();
     }
+    ctx.globalAlpha = 1;
+    // grão de tela
+    const img = ctx.getImageData(0, 0, s, s);
+    for (let i = 0; i < img.data.length; i += 4) {
+      const n = (Math.random() - 0.5) * 10;
+      img.data[i] += n; img.data[i + 1] += n; img.data[i + 2] += n;
+    }
+    ctx.putImageData(img, 0, 0);
   });
-  const canvas = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshStandardMaterial({ map: artTex, roughness: 0.9 }));
+  const canvas = new THREE.Mesh(new THREE.PlaneGeometry(w, h),
+    new THREE.MeshStandardMaterial({ map: artTex, roughness: 0.96, metalness: 0, envMapIntensity: 0.12 }));
   canvas.position.z = 0.025;
   g.add(canvas);
   return g;
@@ -3499,22 +3586,75 @@ function createBed(w) {
   if (Assets) { const _m = Assets.model('bed'); if (_m) {
     const _g = new THREE.Group(); _m.scale.setScalar(w / 2.0); _g.add(_m);
     addContactShadow(_g, 1.6, 1.6, 0.38); return _g; } }
+
+  // ------------------------------------------------------------
+  // CAMA — reconstruída depois de renderizar a suíte
+  // A versão anterior era uma pilha de lajes: base em tecido escuro,
+  // colchão branco, e um "throw" que era outra laje. Faltava o elemento
+  // que faz o olho ler CAMA e não plataforma — o EDREDOM, com a dobra
+  // virada na cabeceira. É a dobra que dá maciez e escala.
+  //
+  // Também: base recuada para o colchão avançar sobre ela (é assim que
+  // cama contemporânea se apoia, e cria uma linha de sombra sob o
+  // colchão), travesseiros encostados na cabeceira em ângulo, e a manta
+  // dos pés dobrada em duas alturas em vez de um bloco.
+  // ------------------------------------------------------------
   const g = new THREE.Group();
   addContactShadow(g, w + 0.5, 2.5, 0.40);
-  const frame = rbox(w, 0.28, 2.05, M.tecidoEscuro);
-  frame.position.y = 0.14; g.add(frame);
-  const mattress = rbox(w - 0.08, 0.24, 2.0, M.roupaCama);
-  mattress.position.y = 0.4; g.add(mattress);
-  const headboard = rbox(w + 0.05, 0.9, 0.1, M.tecidoSofa);
-  headboard.position.set(0, 0.7, -1.0); g.add(headboard);
+  const L = 2.05;
+
+  // base recuada 8 cm de cada lado — o colchão fica em balanço
+  const base = rbox(w - 0.16, 0.22, L - 0.16, M.portaEscura);
+  base.position.y = 0.11; g.add(base);
+
+  // colchão
+  const mattress = rbox(w, 0.26, L, M.roupaCama);
+  mattress.position.y = 0.35; g.add(mattress);
+
+  // EDREDOM cobrindo do pé até dois terços da cama
+  const duvet = rbox(w + 0.06, 0.14, L * 0.68, M.tecidoSofa);
+  duvet.position.set(0, 0.55, L * 0.14); g.add(duvet);
+
+  // dobra virada: faixa mais clara no encontro do edredom com o lençol
+  const dobra = rbox(w + 0.07, 0.09, 0.26, M.roupaCama);
+  dobra.position.set(0, 0.60, L * 0.14 - L * 0.34 - 0.10); g.add(dobra);
+
+  // caimento lateral do edredom
+  for (const sx of [-1, 1]) {
+    const lateral = rbox(0.06, 0.20, L * 0.66, M.tecidoSofa);
+    lateral.position.set(sx * (w / 2 + 0.02), 0.46, L * 0.14);
+    g.add(lateral);
+  }
+
+  // cabeceira estofada, mais alta
+  const headboard = rbox(w + 0.12, 1.05, 0.12, M.tecidoSofa);
+  headboard.position.set(0, 0.72, -L / 2 - 0.04); g.add(headboard);
+  // costura horizontal da cabeceira
+  const costura = rbox(w + 0.13, 0.02, 0.015, M.portaEscura);
+  costura.position.set(0, 0.92, -L / 2 - 0.10); g.add(costura);
+
+  // travesseiros encostados, inclinados
   for (let i = 0; i < 2; i++) {
-    const pillow = rbox(0.55, 0.14, 0.38, M.roupaCama);
-    pillow.position.set(-w / 4 + i * (w / 2), 0.58, -0.75);
-    pillow.rotation.z = (Math.random() - 0.5) * 0.08;
+    const pillow = rbox(0.6, 0.20, 0.42, M.roupaCama);
+    pillow.position.set(-w / 4 + i * (w / 2), 0.60, -L / 2 + 0.34);
+    pillow.rotation.x = -0.38;
+    pillow.rotation.z = (Math.random() - 0.5) * 0.07;
     g.add(pillow);
   }
-  const throwBlanket = rbox(w - 0.1, 0.06, 0.6, M.tecidoEscuro);
-  throwBlanket.position.set(0, 0.55, 0.6); g.add(throwBlanket);
+  // almofadas decorativas menores na frente
+  for (let i = 0; i < 2; i++) {
+    const deco = rbox(0.34, 0.14, 0.3, M.tecidoEscuro);
+    deco.position.set(-0.28 + i * 0.56, 0.60, -L / 2 + 0.62);
+    deco.rotation.x = -0.22;
+    g.add(deco);
+  }
+
+  // manta dos pés, dobrada em dois níveis e caindo pela lateral
+  const manta = rbox(w + 0.04, 0.07, 0.46, M.tecidoEscuro);
+  manta.position.set(0, 0.63, L * 0.34); g.add(manta);
+  const mantaCai = rbox(w + 0.04, 0.26, 0.07, M.tecidoEscuro);
+  mantaCai.position.set(0, 0.50, L * 0.34 + 0.22); g.add(mantaCai);
+
   return g;
 }
 
