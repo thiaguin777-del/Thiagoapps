@@ -729,6 +729,7 @@ const RECT_K = 2.6;
 
 const windUniform = { value: 0 };
 function applyWind(material, amplitude) {
+  ensureOwnProgramKey(material);
   material.onBeforeCompile = (shader) => {
     shader.uniforms.uWindTime = windUniform;
     shader.uniforms.uWindAmp = { value: amplitude };
@@ -2092,10 +2093,40 @@ function noiseNormalTexture(scale, strength) {
 // materiais, não uma luz na cena inteira, e não entra no orçamento.
 // A intensidade acompanha a mesma rampa das luminárias internas.
 // ============================================================
+// ============================================================
+// CHAVE DE PROGRAMA POR MATERIAL — bug encontrado renderizando
+// ------------------------------------------------------------
+// O Three.js monta a chave de cache do programa incluindo
+// `material.onBeforeCompile.toString()`. Como applyMacroVariation() e
+// applyUplightWash() instalam SEMPRE a mesma função (fecham sobre
+// parâmetros diferentes, mas o texto da função é idêntico), materiais
+// distintos caíam na MESMA chave e passavam a compartilhar um programa.
+//
+// Com uniforms escalares isso passa despercebido: o material herda a
+// escala de ruído do vizinho. Com ARRAY é fatal — o programa declarava
+// uWashSpots[8] (estuque) e recebia os 2 pontos do núcleo de pedra, e o
+// upload estourava em "Cannot read properties of undefined (reading
+// 'toArray')", derrubando o pós-processamento junto.
+//
+// Cada material passa a ter chave própria, o que também corrige o caso
+// silencioso: gramado, cascalho, estuque, pedra e travertino tinham
+// variação macro com parâmetros distintos e podiam estar todos rodando
+// o programa do primeiro a compilar.
+// ============================================================
+let _auraKeySeq = 0;
+function ensureOwnProgramKey(material) {
+  if (!material.userData.__auraProgKey) {
+    material.userData.__auraProgKey = 'aura' + (++_auraKeySeq);
+  }
+  const k = material.userData.__auraProgKey;
+  material.customProgramCacheKey = () => k;
+}
+
 const uplightUniform = { value: 0 };
 
 function applyUplightWash(material, spots, alcance, altura, prevHook) {
   if (!spots || !spots.length) return;
+  ensureOwnProgramKey(material);
   const n = spots.length;
   const pontos = spots.map(p => new THREE.Vector3(p[0], p[1], p[2]));
   const prev = prevHook || material.onBeforeCompile;
@@ -2137,6 +2168,7 @@ function applyUplightWash(material, spots, alcance, altura, prevHook) {
 }
 
 function applyMacroVariation(material, scale, strength, prevHook) {
+  ensureOwnProgramKey(material);
   const prev = prevHook || material.onBeforeCompile;
   material.onBeforeCompile = (shader) => {
     if (prev) prev(shader);
