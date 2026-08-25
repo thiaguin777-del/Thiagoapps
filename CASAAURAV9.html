@@ -2602,6 +2602,23 @@ const indoorU = {
   glassZ: { value: [6.0, 4.9] },
   // quanto do céu sobra no fundo do cômodo (calibrado por medição)
   min: { value: 0.30 },
+  // ------------------------------------------------------------
+  // O QUE ENTRA NO LUGAR DO CÉU
+  // Tirar a irradiância do céu e não repor nada deixou toda superfície
+  // VOLTADA PARA CIMA no escuro — o edredom da cama, o assento do sofá, o
+  // tampo da mesa. Faz sentido: era o hemisfério do céu que iluminava o
+  // que aponta para cima, e a máscara o removeu.
+  //
+  // Só que uma superfície dentro de um quarto não enxerga NADA: ela
+  // enxerga parede e teto, que são de estuque claro e madeira quente. É
+  // isso que uma sonda de interior guarda num motor de jogo — a radiância
+  // do próprio cômodo, não zero. Então a máscara troca céu por rebote
+  // quente em vez de subtrair.
+  //
+  // Só no termo difuso. O especular continua apenas atenuado: rebote de
+  // parede é difuso e não produz reflexo nítido.
+  bounce: { value: new THREE.Color(0xffe6cc) },
+  fill: { value: 0.15 },
 };
 
 function applyIndoorOcclusion(material, prevHook) {
@@ -2627,6 +2644,8 @@ function applyIndoorOcclusion(material, prevHook) {
     shader.uniforms.uIndoorHi = indoorU.hi;
     shader.uniforms.uIndoorGlassZ = indoorU.glassZ;
     shader.uniforms.uIndoorMin = indoorU.min;
+    shader.uniforms.uIndoorBounce = indoorU.bounce;
+    shader.uniforms.uIndoorFill = indoorU.fill;
 
     shader.vertexShader = 'varying vec3 vIndoorWPos;\n' + shader.vertexShader.replace(
       '#include <begin_vertex>',
@@ -2637,29 +2656,39 @@ function applyIndoorOcclusion(material, prevHook) {
       'uniform vec3 uIndoorHi[2];',
       'uniform float uIndoorGlassZ[2];',
       'uniform float uIndoorMin;',
+      'uniform vec3 uIndoorBounce;',
+      'uniform float uIndoorFill;',
       'varying vec3 vIndoorWPos;',
       'float auraBoxIn(vec3 p, vec3 lo, vec3 hi){',
       '  vec3 s = smoothstep(lo, lo + vec3(0.10), p) * (vec3(1.0) - smoothstep(hi - vec3(0.10), hi, p));',
       '  return s.x * s.y * s.z;',
       '}',
-      'float auraIndoorK(vec3 p){',
-      '  float k = 1.0;',
+      // Devolve x = atenuação do céu, y = quanto o ponto está dentro.
+      'vec2 auraIndoor(vec3 p){',
+      '  float k = 1.0, dentro = 0.0;',
       '  for (int i = 0; i < 2; i++) {',
       '    float ins = auraBoxIn(p, uIndoorLo[i], uIndoorHi[i]);',
       // perto do vidro o céu entra de verdade: volta para 1 nos ~4 m finais
       '    float win = smoothstep(uIndoorGlassZ[i] - 4.6, uIndoorGlassZ[i] - 0.3, p.z);',
       '    k = min(k, mix(1.0, mix(uIndoorMin, 1.0, win), ins));',
+      '    dentro = max(dentro, ins);',
       '  }',
-      '  return k;',
+      '  return vec2(k, dentro);',
       '}',
     ].join('\n') + '\n' + shader.fragmentShader.replace(
       '#include <lights_fragment_maps>',
       [
         '#include <lights_fragment_maps>',
         '{',
-        '  float auraK = auraIndoorK(vIndoorWPos);',
-        '  iblIrradiance *= auraK;',
-        '  radiance *= auraK;',
+        '  vec2 aura = auraIndoor(vIndoorWPos);',
+        // Difuso: troca céu por rebote de parede. Quanto mais o céu foi
+        // cortado (1 - k), mais rebote entra — dentro de um cômodo a
+        // superfície não vê o nada, vê estuque claro e madeira quente.
+        '  iblIrradiance = iblIrradiance * aura.x',
+        '                + uIndoorBounce * (uIndoorFill * aura.y * (1.0 - aura.x));',
+        // Especular só atenua: rebote difuso de parede não gera reflexo
+        // nítido, e somá-lo aqui daria um brilho falso em piso e bancada.
+        '  radiance *= aura.x;',
         '}',
       ].join('\n'));
   };
@@ -2804,7 +2833,14 @@ function buildMaterials() {
       color: 0xf1ece1,
       normalMap: (() => { const t = noiseNormalTexture(24, 0.7); t.repeat.set(3, 3); return t; })(),
       normalScale: new THREE.Vector2(0.22, 0.22), roughness: 0.88, metalness: 0 }),
-    tapete:       new THREE.MeshStandardMaterial({ map: rugPatternTexture('#d8cdb8', '#a3937a'), roughness: 1.0, metalness: 0 }),
+    // O normal map é a felpa. Sem ele o tapete tem o padrão certo e a
+    // superfície de papel: lã de verdade quebra o realce especular em
+    // milhares de fibras, e é isso que separa tapete de adesivo.
+    tapete:       new THREE.MeshStandardMaterial({
+      map: rugPatternTexture('#d8cdb8', '#a3937a'),
+      normalMap: (() => { const t = noiseNormalTexture(48, 1.5); t.repeat.set(10, 10); return t; })(),
+      normalScale: new THREE.Vector2(0.55, 0.55),
+      roughness: 1.0, metalness: 0 }),
     banheira:     new THREE.MeshStandardMaterial({ color: 0xf4f1ea, roughness: 0.25, metalness: 0 }),
     gramado:      new THREE.MeshStandardMaterial({
       map: grassTexture('#6f8a4f'),
@@ -4025,8 +4061,13 @@ function createVanity(w) {
 }
 
 function createRug(w, d) {
-  const rug = new THREE.Mesh(new THREE.PlaneGeometry(w, d), M.tapete);
-  rug.rotation.x = -Math.PI / 2;
+  // Era um PlaneGeometry de espessura ZERO. Sem borda e sem aresta, o
+  // olho não tem como separar "tapete" de "trecho de piso pintado de
+  // outra cor" — foi assim que ele leu em todos os renders de interior.
+  // 1,8 cm dá a aresta lateral e a sombrinha de contato que dizem
+  // "objeto pousado no chão". O centro afunda 9 mm no piso, o que não
+  // aparece e ainda evita z-fighting com a laje.
+  const rug = rbox(w, 0.018, d, M.tapete, false);
   rug.receiveShadow = true;
   return rug;
 }
