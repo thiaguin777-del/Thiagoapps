@@ -139,7 +139,7 @@ window.__AURA = {
       ? { existe: true, transparente: !!waterObj.material.transparent,
           opacidade: waterObj.material.opacity }
       : { existe: false };
-    if (!waterObj) r.falhas.push('lâmina d\'água ausente');
+    if (!waterObj) r.falhas.push("lâmina d'água ausente");
     else if (!waterObj.material.transparent) r.falhas.push('água deixou de ser transparente');
 
     r.luzesReais = lampLights.length;
