@@ -1119,6 +1119,21 @@ function setupLighting() {
   // Agora usa lookAt() para dentro: explícito, sem depender de lembrar a
   // convenção de eixo.
   // ------------------------------------------------------------
+  // z = 5,6 — 40 cm DENTRO da sala, e é onde tem de ficar.
+  //
+  // Cheguei a mover para 6,15, do lado de fora do vidro, com o argumento
+  // de que a luz representa o céu e portanto pertence ao lado de fora.
+  // O render desmentiu na hora: o pano de vidro do térreo virou uma CHAPA
+  // BRANCA opaca. Óbvio em retrospecto — uma luz de área a 15 cm de um
+  // plano ilumina esse plano antes de qualquer outra coisa, e o plano era
+  // o próprio vidro.
+  //
+  // Medido no enquadramento da fachada, luminância do pano de vidro:
+  //   luz em z = 6,15  ->  245   (chapa branca)
+  //   luz em z = 5,6   ->  179
+  //   luz em z = 5,0   ->  178   (não compensa afastar mais)
+  // A rugosidade do vidro não participa disso: 0,040 e 0,075 dão 245,3 e
+  // 245,2 no primeiro caso. Eram duas suspeitas e só uma era a causa.
   const windowLights = [
     { w: 13.0, h: 2.8, pos: [-4.15, 1.7, 5.6], alvo: [-4.15, 1.4, -2.0] },  // fachada sul social
     { w: 7.4,  h: 2.8, pos: [8.0, 1.7, 5.6],  alvo: [8.0, 1.4, -2.0] },     // fachada sul suíte
@@ -2747,8 +2762,12 @@ function applyIndoorOcclusion(material, prevHook) {
       '  float k = 1.0, dentro = 0.0;',
       '  for (int i = 0; i < 2; i++) {',
       '    float ins = auraBoxIn(p, uIndoorLo[i], uIndoorHi[i]);',
-      // perto do vidro o céu entra de verdade: volta para 1 nos ~4 m finais
-      '    float win = smoothstep(uIndoorGlassZ[i] - 4.6, uIndoorGlassZ[i] - 0.3, p.z);',
+      // Perto do vidro o céu entra de verdade. A rampa era de 4,6 m e foi
+      // para 2,8 m: a 4,6 m de um vão de 3 m de altura a abertura já
+      // subtende pouquíssimo do hemisfério, então boa parte do cômodo
+      // estava recebendo um reforço de céu que a geometria não justifica.
+      // O efeito na imagem era metade da sala lendo clara e azulada.
+      '    float win = smoothstep(uIndoorGlassZ[i] - 2.8, uIndoorGlassZ[i] - 0.3, p.z);',
       '    k = min(k, mix(1.0, mix(uIndoorMin, uIndoorWinMax, win), ins));',
       '    dentro = max(dentro, ins);',
       '  }',
