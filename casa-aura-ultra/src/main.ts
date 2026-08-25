@@ -179,8 +179,55 @@ async function principal(): Promise<void> {
   w.__auraPorQuadro.push(() => qualidade.quadro());
 
   ligarBotoesDoHero(cena);
+  await ligarAudio(cena);
   registrarServiceWorker();
   marco('pronto');
+}
+
+/**
+ * O botão de som vinha com `display:none` no HTML porque o áudio nunca
+ * existiu — os MP3 do manifesto não estão no repositório. Agora o
+ * ambiente é sintetizado em tempo de execução, então o botão aparece.
+ *
+ * O módulo de áudio só é BAIXADO quando o usuário clica: o Howler são
+ * ~30 KB que ninguém precisa carregar para ver a casa em silêncio.
+ */
+async function ligarAudio(cena: {
+  camera?: { position: { x: number; y: number; z: number }; getWorldDirection: (v: unknown) => void };
+}): Promise<void> {
+  const btn = document.getElementById('btn-audio');
+  if (!btn) return;
+  btn.style.display = '';
+  btn.textContent = 'Som';
+
+  let audioMod: typeof import('./core/AudioManager') | null = null;
+
+  btn.addEventListener('click', async () => {
+    if (!audioMod) {
+      btn.textContent = '…';
+      audioMod = await import('./core/AudioManager');
+    }
+    const ligado = audioMod.audio.alternar();
+    btn.textContent = ligado ? 'Som ligado' : 'Som';
+    btn.classList.toggle('active', ligado);
+    analytics.registrar('audio', { ligado });
+
+    if (!ligado) return;
+    // O ouvinte só passa a ser atualizado quando há som para ouvir.
+    const cam = cena.camera;
+    if (!cam) return;
+    const w = window as unknown as { __auraAntesDoQuadro?: ((dt: number) => void)[] };
+    if ((w as { __auraOuvinte?: boolean }).__auraOuvinte) return;
+    (w as { __auraOuvinte?: boolean }).__auraOuvinte = true;
+    const frente = { x: 0, y: 0, z: -1 };
+    w.__auraAntesDoQuadro?.push(() => {
+      cam.getWorldDirection(frente);
+      audioMod?.audio.atualizarOuvinte(
+        cam.position.x, cam.position.y, cam.position.z,
+        frente.x, frente.y, frente.z,
+      );
+    });
+  });
 }
 
 /**
