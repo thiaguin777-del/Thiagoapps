@@ -1168,8 +1168,8 @@ function setupLighting() {
 const LP = {
   day:    { bg: 0x87CEEB, fog: 0xdbe7ef, fogD: 0.00330, sunC: 0xfff5e6, sunI: 2.40, hemiSky: 0xcfe2f2, hemiGnd: 0xa8906c, hemiI: 0.30, amb: 0.05, exp: 0.875, envI: 0.45, pool: 0.0,  lamp: 0.0,  glassGlow: 0.00, waterGlow: 0.00 },
   golden: { bg: 0xE8A971, fog: 0xf0cfa8, fogD: 0.00400, sunC: 0xffb066, sunI: 2.20, hemiSky: 0xffcc88, hemiGnd: 0x9c7550, hemiI: 0.28, amb: 0.05, exp: 0.86, envI: 0.36, pool: 1.15,  lamp: 0.6,  glassGlow: 0.06, waterGlow: 0.05 },
-  blue:   { bg: 0x24406b, fog: 0x35527c, fogD: 0.00300, sunC: 0x7fa0d8, sunI: 0.45, hemiSky: 0x4a72b0, hemiGnd: 0x3a3830, hemiI: 0.36, amb: 0.11, exp: 0.98, envI: 0.34, pool: 1.6,  lamp: 1.0,  glassGlow: 0.20, waterGlow: 0.15 },
-  night:  { bg: 0x0a0e1a, fog: 0x0e1424, fogD: 0.00340, sunC: 0x33446a, sunI: 0.09, hemiSky: 0x1c2436, hemiGnd: 0x14120e, hemiI: 0.22, amb: 0.09, exp: 0.90, envI: 0.15, pool: 1.7,  lamp: 1.6,  glassGlow: 0.32, waterGlow: 0.22 },
+  blue:   { bg: 0x24406b, fog: 0x35527c, fogD: 0.00300, sunC: 0x7fa0d8, sunI: 0.45, hemiSky: 0x4a72b0, hemiGnd: 0x3a3830, hemiI: 0.36, amb: 0.11, exp: 0.98, envI: 0.34, pool: 1.6,  lamp: 1.0,  glassGlow: 0.09, waterGlow: 0.15 },
+  night:  { bg: 0x0a0e1a, fog: 0x0e1424, fogD: 0.00340, sunC: 0x33446a, sunI: 0.09, hemiSky: 0x33405c, hemiGnd: 0x14120e, hemiI: 0.55, amb: 0.18, exp: 1.05, envI: 0.40, pool: 1.7,  lamp: 1.6,  glassGlow: 0.10, waterGlow: 0.22 },
 };
 
 // ============================================================
@@ -1307,7 +1307,7 @@ function applySolarTime(t) {
       // cena inteira. Agora só age no último trecho e não vai a zero —
       // céu de noite real não é preto, tem claridade residual.
       skyNightFade.value = t < 0.80 ? 1.0
-        : Math.max(0.30, 1.0 - (t - 0.80) / 0.20 * 0.70);
+        : Math.max(0.55, 1.0 - (t - 0.80) / 0.20 * 0.45);
     }
   }
   // A água é MeshPhysicalMaterial (ver buildPoolAndDeck): escurece e
@@ -1377,6 +1377,12 @@ function applySolarTime(t) {
     m.emissiveIntensity = Math.min(1.6, s.lamp) * (r * r * (3 - 2 * r)) * 1.1;
   }
 
+  // CORRIGIDO renderizando a 'Visão Final' com a luz do capítulo: à noite
+  // o glassGlow em 0,32 transformava cada pano de vidro num painel âmbar
+  // CHAPADO. O vidro deixava de mostrar o interior — que é justamente o
+  // que ele deveria revelar — e a casa virava um punhado de retângulos
+  // luminosos boiando no preto. O brilho do vidro tem de ser um resto,
+  // não a fonte: quem ilumina a cena noturna são as luminárias internas.
   if (glassMaterial) { glassMaterial.emissive.setHex(0xffdcae); glassMaterial.emissiveIntensity = s.glassGlow; }
   if (waterMaterial) { waterMaterial.emissive.setHex(0x2aa0bb); waterMaterial.emissiveIntensity = s.waterGlow; }
 
