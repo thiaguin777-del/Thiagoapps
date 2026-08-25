@@ -4,5 +4,15 @@
 .devtest/package-lock.json
 .devtest/index.html
 # saídas de render (qualquer pasta criada por shoot.mjs)
-.devtest/*/
-!.devtest/node_modules/
+.devtest/shots*/
+.devtest/after*/
+.devtest/q-high/
+.devtest/merge1/
+.devtest/v2/
+.devtest/final*/
+.devtest/horiz/
+.devtest/entrega*/
+.devtest/piscina*/
+.devtest/noite*/
+.devtest/crepusculo/
+.devtest/verif/
