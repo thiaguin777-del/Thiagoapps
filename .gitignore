@@ -14,3 +14,5 @@
 # intermediarios do build autocontido
 dist/_entrada.mjs
 dist/_bundle.mjs
+casa-aura-ultra/dist/
+casa-aura-ultra/node_modules/
