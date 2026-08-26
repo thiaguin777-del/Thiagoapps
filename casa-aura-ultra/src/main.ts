@@ -95,7 +95,7 @@ async function principal(): Promise<void> {
     cenaAura.montar({
       scene: cena.scene, camera: cena.camera, renderer: cena.renderer,
       controls: cena.controls, composer: cena.composer,
-      M: cena.M, Quality: cena.Quality,
+      M: cena.M, Quality: cena.Quality, houseGroup: cena.houseGroup,
       sunLight: cena.sunLight, solarTime: cena.solarTime,
     });
   } catch (e) {
@@ -151,6 +151,11 @@ async function principal(): Promise<void> {
   //    para qualquer verificação automatizada, que via zero hotspots numa
   //    experiência que estava correta. Marco de "pronto" tem de
   //    significar pronto.
+  // O painel do Modo Seção assume o botão herdado `#btn-reveal`.
+  const { hud } = await import('./ui/HUD');
+  hud.montar();
+  hud.aoAlternar = (ativo, eixo) => analytics.registrar('corte', { ativo, eixo });
+
   const { HotspotManager } = await import('./ui/HotspotManager');
   try {
     await HotspotManager.iniciar();

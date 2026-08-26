@@ -19,6 +19,7 @@ import { volumetrica, type Abertura } from '../effects/VolumetricLight';
 import { pos } from '../effects/PostProcessing';
 import { ParticleSystem, criarPoeira, criarFumaca, criarPassaros } from '../effects/ParticleSystem';
 import { diretor } from '../core/CameraDirector';
+import { corte } from '../effects/CutMode';
 
 // ---- Geometria conhecida da cena, copiada do legado ----
 // buildPoolAndDeck(): poolW/poolD/poolCx/poolCz/waterY
@@ -58,6 +59,7 @@ interface CenaLegado {
   controls: { enabled: boolean; target: THREE.Vector3 };
   composer: unknown;
   M: Record<string, THREE.Material>;
+  houseGroup: THREE.Object3D | null;
   // O legado é `@ts-nocheck`, então `level` chega como `string`. Estreitar
   // aqui, num ponto só, é melhor que espalhar `as` por todos os usos.
   Quality: { level: string };
@@ -91,6 +93,11 @@ export class CasaAuraScene {
       camera: cena.camera,
       renderer: cena.renderer,
       nivel: nivelDeQualidade(cena.Quality.level),
+    });
+
+    corte.ligar({
+      scene: cena.scene, renderer: cena.renderer,
+      houseGroup: cena.houseGroup, M: cena.M,
     });
 
     diretor.ligar(cena.camera, cena.controls);
@@ -180,6 +187,7 @@ export class CasaAuraScene {
     pos.atualizar(dt);
     agua.atualizar(dt);
     volumetrica.atualizar(dt);
+    corte.atualizar(dt);
     this.particulas.atualizar(dt);
 
     // O que depende da hora solar só é recalculado quando ela muda de
@@ -225,6 +233,7 @@ export class CasaAuraScene {
   }
 
   destruir(): void {
+    corte.destruir();
     this.particulas.destruir();
     volumetrica.destruir();
     this.montada = false;

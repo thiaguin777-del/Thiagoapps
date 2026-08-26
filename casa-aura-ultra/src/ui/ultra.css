@@ -345,3 +345,80 @@ body[data-estado="PRESENTATION"] #convite-comercial { display: none; }
   #fallback-rico .fb-ficha { grid-template-columns: 1fr; gap: 2px 0; }
   #fallback-rico .fb-ficha dd { border-top: 0; padding-top: 0; padding-bottom: 10px; }
 }
+
+/* ---------- PAINEL DO MODO SEÇÃO ---------- */
+/* Só existe quando a seção está ligada: em repouso ele seria mais um
+   bloco disputando espaço com a barra solar e os capítulos. */
+#painel-corte {
+  position: fixed;
+  left: 20px; top: 50%;
+  transform: translateY(-50%) translateX(-14px);
+  z-index: 58;
+  width: 232px;
+  padding: 18px;
+  border-radius: 14px;
+  border: 1px solid var(--aura-borda);
+  background: var(--aura-vidro);
+  backdrop-filter: blur(16px) saturate(1.3);
+  -webkit-backdrop-filter: blur(16px) saturate(1.3);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5);
+  opacity: 0; pointer-events: none;
+  transition: opacity 0.25s ease, transform 0.25s ease;
+}
+body[data-corte="1"] #painel-corte {
+  opacity: 1; pointer-events: auto;
+  transform: translateY(-50%) translateX(0);
+}
+
+.pc-titulo {
+  font-size: 10px; letter-spacing: 0.22em; text-transform: uppercase;
+  color: rgba(232, 226, 214, 0.5);
+  margin-bottom: 12px;
+}
+.pc-eixos { display: flex; gap: 6px; margin-bottom: 16px; }
+.pc-eixo {
+  flex: 1;
+  padding: 7px 4px;
+  font-size: 10.5px;
+  border-radius: 8px;
+  border: 1px solid var(--aura-borda);
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(232, 226, 214, 0.72);
+  cursor: pointer;
+  transition: background 0.18s ease, color 0.18s ease, border-color 0.18s ease;
+}
+.pc-eixo:hover { background: rgba(255, 255, 255, 0.09); color: var(--aura-creme); }
+.pc-eixo.active {
+  border-color: rgba(201, 162, 39, 0.55);
+  background: rgba(201, 162, 39, 0.16);
+  color: var(--aura-creme);
+}
+
+.pc-linha { display: block; margin-bottom: 12px; }
+.pc-linha > span {
+  display: block;
+  font-size: 11px;
+  color: rgba(232, 226, 214, 0.6);
+  margin-bottom: 6px;
+}
+.pc-linha input[type="range"] { width: 100%; accent-color: var(--aura-ouro); }
+.pc-check {
+  display: flex; align-items: flex-start; gap: 8px;
+  font-size: 11px; line-height: 1.45;
+  color: rgba(232, 226, 214, 0.6);
+  margin-bottom: 0; cursor: pointer;
+}
+.pc-check input { accent-color: var(--aura-ouro); margin-top: 1px; }
+
+/* Durante apresentação e cinemático o painel some junto com o resto. */
+body[data-estado="PRESENTATION"] #painel-corte,
+body[data-estado="CINEMATIC"] #painel-corte { display: none; }
+
+@media (max-width: 720px) {
+  #painel-corte {
+    left: 12px; right: 12px; width: auto;
+    top: auto; bottom: 150px;
+    transform: translateX(0) translateY(10px);
+  }
+  body[data-corte="1"] #painel-corte { transform: translateX(0) translateY(0); }
+}

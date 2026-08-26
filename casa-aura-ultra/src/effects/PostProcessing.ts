@@ -92,8 +92,32 @@ export class PostProcessing {
     const c = alvo.composer;
     if (!c) return;   // tier low: render direto, nada a fazer
 
+    this.ligarStencil(c);
     this.ligarAntiAliasing(c, alvo);
     if (alvo.nivel === 'ultra') this.ligarProfundidadeDeCampo(c, alvo);
+  }
+
+  // ------------------------------------------------------------
+  /**
+   * O EffectComposer cria os render targets como
+   * `new WebGLRenderTarget(w, h, { type: HalfFloatType })` — e o padrão de
+   * `stencilBuffer` é FALSO. Quando há composer, portanto, a cena é
+   * desenhada num alvo SEM stencil.
+   *
+   * Consequência medida: o Modo Seção pintava a tela inteira de creme. A
+   * tampa do corte é desenhada com `stencilFunc: NotEqual, stencilRef: 0`,
+   * e sem buffer de stencil esse teste passa em todo pixel — a tampa
+   * deixava de ser a tampa e virava um plano gigante na frente da casa.
+   *
+   * É o mesmo padrão do bug do anti-aliasing: uma capacidade que o
+   * renderizador tem, que o composer silenciosamente não carrega adiante.
+   */
+  private ligarStencil(c: ComposerLike): void {
+    for (const alvo of [c.renderTarget1, c.renderTarget2]) {
+      if (alvo.stencilBuffer) continue;
+      alvo.stencilBuffer = true;
+      alvo.dispose();   // força recriar a textura com o anexo de stencil
+    }
   }
 
   // ------------------------------------------------------------
