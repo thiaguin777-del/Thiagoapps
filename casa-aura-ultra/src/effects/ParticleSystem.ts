@@ -17,6 +17,12 @@
 //            competir com a arquitetura pela atenção.
 // ============================================================
 import * as THREE from 'three';
+import POEIRA_VERT from '../shaders/poeira.vert?raw';
+import POEIRA_FRAG from '../shaders/poeira.frag?raw';
+import FUMACA_VERT from '../shaders/fumaca.vert?raw';
+import FUMACA_FRAG from '../shaders/fumaca.frag?raw';
+import PASSARO_VERT from '../shaders/passaro.vert?raw';
+import PASSARO_FRAG from '../shaders/passaro.frag?raw';
 
 export interface OpcoesParticulas {
   /** Reduzido nos tiers baixos; zero desliga o efeito. */
@@ -26,51 +32,6 @@ export interface OpcoesParticulas {
 // ---------------------------------------------------------------
 // POEIRA
 // ---------------------------------------------------------------
-const POEIRA_VERT = /* glsl */ `
-  uniform float casaAura_tempo;
-  uniform float casaAura_tamanho;
-  attribute vec3 casaAura_semente;   // x: fase, y: velocidade, z: raio da orbita
-  varying float casaAura_alpha;
-
-  void main() {
-    vec3 p = position;
-    float fase = casaAura_semente.x;
-    float vel  = casaAura_semente.y;
-    float raio = casaAura_semente.z;
-
-    // Deriva lenta e circular, mais uma subida quase imperceptivel. Poeira
-    // real nao cai: ela fica suspensa e vagueia com a corrente de ar.
-    float t = casaAura_tempo * vel + fase * 6.2831;
-    p.x += sin(t) * raio;
-    p.z += cos(t * 0.83) * raio;
-    p.y += sin(t * 0.37) * raio * 0.6;
-
-    vec4 mv = modelViewMatrix * vec4(p, 1.0);
-    // Tamanho em perspectiva: perto e maior. Sem isto a poeira longe fica
-    // do mesmo tamanho da de perto e o efeito vira chuva de pontos.
-    gl_PointSize = casaAura_tamanho * (30.0 / -mv.z);
-    gl_Position = projectionMatrix * mv;
-
-    // Some com a distancia, para nao virar neve no horizonte.
-    casaAura_alpha = smoothstep(60.0, 6.0, -mv.z);
-  }
-`;
-
-const POEIRA_FRAG = /* glsl */ `
-  uniform vec3 casaAura_cor;
-  uniform float casaAura_opacidade;
-  varying float casaAura_alpha;
-
-  void main() {
-    // Disco suave desenhado na propria coordenada do ponto: sem textura,
-    // sem upload, sem gerenciamento de memoria.
-    vec2 d = gl_PointCoord - 0.5;
-    float r = dot(d, d);
-    if (r > 0.25) discard;
-    float borda = smoothstep(0.25, 0.02, r);
-    gl_FragColor = vec4(casaAura_cor, borda * casaAura_alpha * casaAura_opacidade);
-  }
-`;
 
 export function criarPoeira(
   caixa: THREE.Box3,
@@ -119,54 +80,6 @@ export function criarPoeira(
 // ---------------------------------------------------------------
 // FUMAÇA (churrasqueira)
 // ---------------------------------------------------------------
-const FUMACA_VERT = /* glsl */ `
-  uniform float casaAura_tempo;
-  uniform float casaAura_altura;
-  attribute vec2 casaAura_semente;   // x: fase, y: escala
-  varying float casaAura_vida;
-
-  void main() {
-    float fase = casaAura_semente.x;
-    // Cada particula percorre 0..1 e reinicia. O fract garante o ciclo sem
-    // nenhum estado do lado da CPU.
-    float vida = fract(casaAura_tempo * 0.14 + fase);
-    casaAura_vida = vida;
-
-    vec3 p = position;
-    p.y += vida * casaAura_altura;
-    // Abre em cone e ondula: fumaca nao sobe reta, e a ondulacao e o que
-    // impede o efeito de ler como coluna de particulas.
-    float abertura = vida * 0.9;
-    p.x += sin(fase * 6.28 + vida * 3.4) * abertura;
-    p.z += cos(fase * 5.11 + vida * 2.9) * abertura;
-
-    vec4 mv = modelViewMatrix * vec4(p, 1.0);
-    // CALIBRADO OLHANDO O RENDER. Com (10 + vida*46) * (26 / -mv.z) uma
-    // particula chegava a ~97 px a 15 m, e 120 delas empilhadas fechavam
-    // um disco branco sobre a area gourmet — parecia explosao, nao
-    // churrasqueira. Fumaca de verdade e FINA: o que se ve e o volume,
-    // nao cada bolota.
-    gl_PointSize = (5.0 + vida * 20.0) * casaAura_semente.y * (13.0 / -mv.z);
-    gl_Position = projectionMatrix * mv;
-  }
-`;
-
-const FUMACA_FRAG = /* glsl */ `
-  varying float casaAura_vida;
-  uniform vec3 casaAura_cor;
-  uniform float casaAura_opacidade;
-
-  void main() {
-    vec2 d = gl_PointCoord - 0.5;
-    float r = dot(d, d);
-    if (r > 0.25) discard;
-    float borda = smoothstep(0.25, 0.0, r);
-    // Nasce quase opaca e some no topo. A subida do alpha no comeco evita
-    // que a particula "apareca" do nada na boca da churrasqueira.
-    float a = smoothstep(0.0, 0.12, casaAura_vida) * (1.0 - casaAura_vida);
-    gl_FragColor = vec4(casaAura_cor, borda * a * casaAura_opacidade);
-  }
-`;
 
 export function criarFumaca(
   origem: THREE.Vector3,
@@ -251,23 +164,8 @@ export function criarPassaros(
       casaAura_tempo: { value: 0 },
       casaAura_cor: { value: new THREE.Color(0x2b2b2e) },
     },
-    vertexShader: /* glsl */ `
-      uniform float casaAura_tempo;
-      attribute float casaAura_lado;
-      void main() {
-        vec3 p = position;
-        // A batida vem de um deslocamento vertical na PONTA da asa, com
-        // fase por instancia dada pela posicao do objeto — assim o bando
-        // nao bate em unissono, que e o que denuncia efeito automatico.
-        float bat = sin(casaAura_tempo * 7.0 + modelMatrix[3].x * 1.7) * 0.34;
-        p.y += abs(casaAura_lado) * bat;
-        gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
-      }
-    `,
-    fragmentShader: /* glsl */ `
-      uniform vec3 casaAura_cor;
-      void main() { gl_FragColor = vec4(casaAura_cor, 0.85); }
-    `,
+    vertexShader: PASSARO_VERT,
+    fragmentShader: PASSARO_FRAG,
     transparent: true,
     side: THREE.DoubleSide,
     depthWrite: false,
