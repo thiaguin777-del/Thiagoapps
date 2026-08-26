@@ -20,6 +20,7 @@ import { pos } from '../effects/PostProcessing';
 import { ParticleSystem, criarPoeira, criarFumaca, criarPassaros } from '../effects/ParticleSystem';
 import { diretor } from '../core/CameraDirector';
 import { corte } from '../effects/CutMode';
+import { orcamentoDeLuz } from '../core/LightBudget';
 
 // ---- Geometria conhecida da cena, copiada do legado ----
 // buildPoolAndDeck(): poolW/poolD/poolCx/poolCz/waterY
@@ -60,6 +61,7 @@ interface CenaLegado {
   composer: unknown;
   M: Record<string, THREE.Material>;
   houseGroup: THREE.Object3D | null;
+  lampLights: THREE.Light[];
   // O legado é `@ts-nocheck`, então `level` chega como `string`. Estreitar
   // aqui, num ponto só, é melhor que espalhar `as` por todos os usos.
   Quality: { level: string };
@@ -99,6 +101,10 @@ export class CasaAuraScene {
       scene: cena.scene, renderer: cena.renderer,
       houseGroup: cena.houseGroup, M: cena.M,
     });
+
+    // Teto de luzes por tier. Precisa vir DEPOIS de a cena montar as
+    // luminarias, e antes do primeiro quadro pesado.
+    orcamentoDeLuz.ligar(cena.lampLights || [], cena.camera, nivelDeQualidade(cena.Quality.level));
 
     diretor.ligar(cena.camera, cena.controls);
     diretor.aoFocar = (d, dur) => pos.puxarFoco(d, dur);
@@ -188,6 +194,7 @@ export class CasaAuraScene {
     agua.atualizar(dt);
     volumetrica.atualizar(dt);
     corte.atualizar(dt);
+    orcamentoDeLuz.quadro();
     this.particulas.atualizar(dt);
 
     // O que depende da hora solar só é recalculado quando ela muda de

@@ -96,6 +96,7 @@ async function principal(): Promise<void> {
       scene: cena.scene, camera: cena.camera, renderer: cena.renderer,
       controls: cena.controls, composer: cena.composer,
       M: cena.M, Quality: cena.Quality, houseGroup: cena.houseGroup,
+      lampLights: cena.lampLights,
       sunLight: cena.sunLight, solarTime: cena.solarTime,
     });
   } catch (e) {
