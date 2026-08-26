@@ -139,6 +139,24 @@ Um botão morto encontrado aqui: `HERO -> PRESENTATION` não estava na
 tabela da FSM, e o botão "Apresentação" fica na barra de modos desde o
 hero — clicar nele não fazia absolutamente nada.
 
+### Modo Seção — plano de clipping com tampa por stencil
+Seção de arquitetura em três eixos (transversal, longitudinal, planta),
+com plano deslizante, painel próprio e atalhos (`C` liga/desliga, setas
+movem, `Shift` refina). A tampa fecha a face cortada; o volume removido
+aparece em arame, para o corte não ser ambíguo.
+
+| medida | valor |
+|---|---|
+| malhas estruturais com tampa | 23 |
+| malhas de stencil (2 por sólido) | 46 |
+| materiais recortados | 75 |
+| chapas excluídas da tampa (não são sólidos fechados) | 1 |
+| cobertura da tampa, `NotEqual` (correto) | 4,9% do quadro |
+| cobertura da tampa, `Equal` (invertido, controle) | 80,0% |
+
+As duas últimas linhas são o teste que provou que o stencil discrimina:
+invertendo a função, a tampa passa a cobrir exatamente o complemento.
+
 ### Build
 `vite build` limpo. Caminho crítico: **11,8 kB de entrada + 16,7 kB de
 CSS**. `three.js` (346 kB gzip), a cena, GSAP e Howler ficam todos fora
@@ -177,11 +195,6 @@ que é conteúdo real e útil no mesmo lugar. Bloqueio: ausência de imagens.
 Próxima ação: capturar 6 panoramas equiretangulares da própria cena num
 aparelho com GPU (`CubeCamera` + conversão) e guardá-los em `public/360/`.
 
-**Modo Corte com stencil.** O "Modo Corte" herdado ergue o volume superior
-— funciona e é convincente. O corte por `THREE.Plane` com stencil e
-wireframe nas paredes cortadas não foi feito. Bloqueio: nenhum; é escopo
-não iniciado.
-
 **Supabase.** A migração `supabase/migrations/0001_casa_aura.sql` está
 escrita e **não foi aplicada**. A organização existe e tem zero projetos;
 criar um é ação cobrada e externa, então não fiz por conta própria.
@@ -209,3 +222,13 @@ Vale registrar, porque foi caro descobrir:
    `iniciar()` não aguardado ainda resolvia. Nunca estiveram quebrados.
 4. **A churrasqueira que eu chutei.** Inventei uma coordenada em vez de ler
    a da cena, e a fumaça saía de dentro da sala.
+5. **O buffer de stencil que o composer não carregava.** Mesmo padrão do
+   anti-aliasing: o renderizador tem a capacidade, o `EffectComposer` cria
+   os render targets sem ela, e o teste de stencil passava em todo pixel.
+6. **A caixa de 900 metros.** `Box3.setFromObject(houseGroup)` inclui o
+   terreno. O plano de corte caía a 45 m da casa e a tampa virava um
+   quadrado de 1440 m.
+7. **A tampa que eu culpei sem medir.** Metade do mundo sumia no Modo
+   Seção e eu passei três rodadas atrás da tampa de stencil. A tampa
+   estava certa (4,9% do quadro); o que sumia era o gramado, porque eu
+   havia aplicado o plano de clipping ao terreno junto com a casa.
