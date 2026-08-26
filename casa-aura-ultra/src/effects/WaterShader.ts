@@ -46,10 +46,28 @@ export interface AlvosAgua {
 }
 
 // A função de cáustica: três iterações de um campo que se dobra sobre si
-// mesmo. O `pow` alto no fim é o que transforma um borrão suave nos
-// filamentos finos e brilhantes que a água faz de verdade — sem ele o
-// efeito parece névoa, não luz focada.
+// mesmo. O `pow` no fim é o que transforma um borrão suave nos filamentos
+// brilhantes que a água faz de verdade — sem ele o efeito parece névoa,
+// não luz focada.
+//
+// O DOMÍNIO DE ENTRADA NÃO É OPCIONAL, e foi por não perceber isso que a
+// primeira versão não fez absolutamente nada. O termo interno é
+// `p / (sin(...) / 0.005)`, ou seja `p` dividido por algo de módulo até
+// 200. Se `p` for pequeno (as coordenadas da piscina em metros, ±2,8), a
+// divisão dá quase zero, `1/length` explode, e `c` satura: a função
+// devolvia 1,0 em CADA ponto do casco. Não era uma cáustica fraca — era
+// uma constante, e por isso o A/B não acusava diferença nenhuma.
+//
+// O domínio correto é o do shader original: as coordenadas dobradas em
+// [0, TAU) e deslocadas para perto de -250. Aí `p / 200` fica na casa de
+// 1,25, `1/length` fica em torno de 0,6, e sai o desenho de rede.
+// Conferido numericamente antes de voltar ao shader: média 0,11, pico
+// 0,68, 27% da área acima de 0,15.
+const TAU_GLSL = '6.28318530718';
 const GLSL_CAUSTICA = /* glsl */ `
+  vec2 casaAura_dominio(vec2 uv) {
+    return mod(uv * ${TAU_GLSL}, ${TAU_GLSL}) - 250.0;
+  }
   float casaAura_caustica(vec2 p, float t) {
     vec2 i = p;
     float c = 1.0;
@@ -63,7 +81,10 @@ const GLSL_CAUSTICA = /* glsl */ `
     }
     c /= 3.0;
     c = 1.17 - pow(c, 1.4);
-    return clamp(pow(abs(c), 8.0), 0.0, 1.0);
+    // Expoente 6: com 8 o filamento cobre 11% do fundo e some sob a
+    // lâmina de 45% de opacidade; com 4 cobre 57% e vira um brilho geral.
+    // 6 dá 27% de cobertura, que é desenho de rede.
+    return clamp(pow(abs(c), 6.0), 0.0, 1.0);
   }
 `;
 
@@ -98,6 +119,10 @@ export class WaterShader {
   private injetarRevestimento(mat: THREE.Material | null): void {
     if (!mat) return;
     mat.onBeforeCompile = (shader) => {
+      // Guarda o shader compilado. Sem isto não há como responder, num
+      // aparelho real, à pergunta "a injeção entrou?" — e foi exatamente
+      // essa pergunta que travou a calibragem das cáusticas.
+      mat.userData.auraShader = shader;
       shader.uniforms.casaAura_tempo = this.uTempo;
       shader.uniforms.casaAura_sol = this.uSol;
       shader.uniforms.casaAura_nivel = this.uNivel;
@@ -126,17 +151,29 @@ export class WaterShader {
           '#include <emissivemap_fragment>',
           `#include <emissivemap_fragment>
            {
-             // Escala: 3,2 dá filamentos de ~30 cm no fundo, que é a
-             // escala real numa piscina de 1,5 m de lâmina.
-             vec2 pc = (casaAura_pm.xz - casaAura_centro.xz) * 3.2;
+             // ESCALA, SEGUNDA CALIBRAGEM, olhando o render com o ganho
+             // forçado a 40 para enxergar o padrão. Com 1,4 o casco
+             // recebia ~14 dobras em 10,2 m e, como a função ainda tem
+             // estrutura fina DENTRO de cada dobra, o resultado era um
+             // chuvisco de pontos de poucos pixels — que além de não ler
+             // como cáustica ainda cintila quando a câmera anda.
+             // 0,35 dá ~3,6 dobras no mesmo trecho: malha larga, com
+             // filamento da largura de uma mão no fundo.
+             vec2 pc = casaAura_dominio((casaAura_pm.xz - casaAura_centro.xz) * 0.35);
              float c = casaAura_caustica(pc, casaAura_tempo * 0.55);
              // Enfraquece com a profundidade: a luz se espalha ao descer.
+             // Só que 0,35 no fundo era queda demais para 1,5 m de lâmina
+             // — água de piscina é clara e a malha chega ao fundo forte.
              float prof = clamp((casaAura_nivel - casaAura_pm.y) / 1.6, 0.0, 1.0);
-             float atenua = mix(1.0, 0.35, prof);
+             float atenua = mix(1.0, 0.7, prof);
              // Nas paredes verticais do casco a cáustica também aparece,
              // mais fraca e esticada — por isso não há máscara de normal
              // aqui: cortar a parede deixaria uma linha dura na quina.
-             totalEmissiveRadiance += vec3(0.55, 0.95, 1.0) * c * casaAura_sol * atenua * 1.15;
+             // GANHO 5,0. Com 1,6 a malha existia no shader e não chegava ao
+             // olho: forçando o uniform a 40 (25x o máximo do produto) o
+             // padrão aparecia inteiro, o que provou que o termo chega à
+             // tela e que o problema era só de amplitude.
+             totalEmissiveRadiance += vec3(0.55, 0.95, 1.0) * c * casaAura_sol * atenua * 5.0;
            }`,
         );
     };
@@ -150,6 +187,7 @@ export class WaterShader {
   private injetarLamina(mat: THREE.Material | null): void {
     if (!mat) return;
     mat.onBeforeCompile = (shader) => {
+      mat.userData.auraShader = shader;
       shader.uniforms.casaAura_tempo = this.uTempo;
       shader.uniforms.casaAura_centro = this.uCentro;
       shader.uniforms.casaAura_meia = this.uMeia;

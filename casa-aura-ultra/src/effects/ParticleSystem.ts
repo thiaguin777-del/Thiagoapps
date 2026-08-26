@@ -141,7 +141,12 @@ const FUMACA_VERT = /* glsl */ `
     p.z += cos(fase * 5.11 + vida * 2.9) * abertura;
 
     vec4 mv = modelViewMatrix * vec4(p, 1.0);
-    gl_PointSize = (10.0 + vida * 46.0) * casaAura_semente.y * (26.0 / -mv.z);
+    // CALIBRADO OLHANDO O RENDER. Com (10 + vida*46) * (26 / -mv.z) uma
+    // particula chegava a ~97 px a 15 m, e 120 delas empilhadas fechavam
+    // um disco branco sobre a area gourmet — parecia explosao, nao
+    // churrasqueira. Fumaca de verdade e FINA: o que se ve e o volume,
+    // nao cada bolota.
+    gl_PointSize = (5.0 + vida * 20.0) * casaAura_semente.y * (13.0 / -mv.z);
     gl_Position = projectionMatrix * mv;
   }
 `;
@@ -168,7 +173,7 @@ export function criarFumaca(
   opcoes: OpcoesParticulas = {},
 ): THREE.Points | null {
   const densidade = opcoes.densidade ?? 1;
-  const n = Math.round(120 * densidade);
+  const n = Math.round(70 * densidade);
   if (n < 10) return null;
 
   const geo = new THREE.BufferGeometry();
@@ -188,8 +193,13 @@ export function criarFumaca(
     uniforms: {
       casaAura_tempo: { value: 0 },
       casaAura_altura: { value: 2.6 },
-      casaAura_cor: { value: new THREE.Color(0xdcd6cc) },
-      casaAura_opacidade: { value: 0.24 },
+      // Cinza, não creme quase branco. Sob luz noturna o creme lia como
+      // fonte de luz própria — a churrasqueira parecia estar pegando fogo.
+      casaAura_cor: { value: new THREE.Color(0x9a958c) },
+      // 0,24 por partícula, com dez delas empilhadas, dá 94% de cobertura:
+      // opaco. 0,07 dá ~50%, que é o que deixa ver a pérgola ATRAVÉS da
+      // fumaça — e é ver através que faz o olho aceitar como fumaça.
+      casaAura_opacidade: { value: 0.07 },
     },
     vertexShader: FUMACA_VERT,
     fragmentShader: FUMACA_FRAG,
