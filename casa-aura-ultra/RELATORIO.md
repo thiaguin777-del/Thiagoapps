@@ -157,6 +157,49 @@ aparece em arame, para o corte não ser ambíguo.
 As duas últimas linhas são o teste que provou que o stencil discrimina:
 invertendo a função, a tampa passa a cobrir exatamente o complemento.
 
+### Teto de luzes por tier
+Cada luz real entra no laço do fragment shader — custo por pixel vezes
+número de luzes — e mudar a contagem recompila os shaders, o que produz um
+engasgo justo quando as luminárias acendem ao anoitecer. O teto corta as
+luminárias mais distantes da câmera nos tiers móveis, reavaliando a cada
+2,5 s com histerese de 2 m. As cúpulas continuam acesas: a cena já mantém
+`emissiveFixtures`, que brilham sem custo de iluminação.
+
+**A premissa inicial estava errada e o módulo nasceu inerte.** Escrevi
+supondo uma dúzia de pontos de luz e pus o teto de `medium` em 6.
+Contando: a cena tem **5** luminárias e **9** luzes no total — com teto 6
+o arquivo não cortava nada, ou seja eu tinha acabado de criar um botão
+morto, do mesmo tipo que este documento passa o tempo todo denunciando.
+
+Tetos corrigidos para valores que vinculam. Medido em `medium`:
+
+| medida | antes | depois |
+|---|---|---|
+| luminárias ativas | 5 | 4 |
+| PointLights no laço | 6 | 5 |
+| luzes contando para o shader | 9 | 8 |
+
+É um ganho modesto. É o ganho que existe.
+
+### GLSL em `src/shaders/`
+Nove shaders saíram dos módulos de efeito para arquivos `.vert`/`.frag`/
+`.glsl`, carregados com o `?raw` nativo do Vite.
+
+**Verificado sem render** (a rodada de navegador foi recusada nesta
+etapa), por dois caminhos que juntos cobrem o risco real:
+
+1. Comparação token a token de cada shader extraído contra o texto
+   embutido no commit anterior, ignorando espaços e comentários — os
+   **nove batem exatamente**. GLSL idêntico ao que já compilava compila
+   igual.
+2. Build limpo, e `casaAura_caustica`, `casaAura_dominio`,
+   `casaAura_lado`, `casaAura_paraCamera` e `gl_PointCoord` aparecem no
+   bundle. Isso descarta o modo de falha que importaria: um `?raw`
+   resolvendo para string vazia passa no typecheck e quebra em silêncio.
+
+O que isso **não** prova: que a cena renderiza. Para isso falta a rodada
+de navegador.
+
 ### Build
 `vite build` limpo. Caminho crítico: **11,8 kB de entrada + 16,7 kB de
 CSS**. `three.js` (346 kB gzip), a cena, GSAP e Howler ficam todos fora
@@ -202,9 +245,8 @@ Próxima ação: você cria o projeto e eu aplico a migração e ligo o cliente.
 
 **Não iniciados**, do escopo original: KTX2/Basis, PMREM pré-assado,
 `BatchedMesh`, BVH, SSR, TAA, LOD/impostores de vegetação, lightmaps
-assados, culling por portais, `AssetManager`/`InputManager` como módulos
-próprios, `src/shaders/*.glsl` em arquivos separados (o GLSL está
-embutido nos módulos de efeito, com os prefixos `casaAura_` exigidos).
+assados, culling por portais, e `AssetManager`/`InputManager` como
+módulos próprios.
 
 ---
 
@@ -232,3 +274,7 @@ Vale registrar, porque foi caro descobrir:
    Seção e eu passei três rodadas atrás da tampa de stencil. A tampa
    estava certa (4,9% do quadro); o que sumia era o gramado, porque eu
    havia aplicado o plano de clipping ao terreno junto com a casa.
+8. **A dúzia de luzes que não existia.** Escrevi o teto de luzes supondo
+   uma cena cheia de pontos ao anoitecer. São 5 luminárias. O teto que
+   escolhi não cortava nada — o módulo nasceu inerte e só um `console.info`
+   com a contagem real revelou isso.
