@@ -200,6 +200,22 @@ etapa), por dois caminhos que juntos cobrem o risco real:
 O que isso **não** prova: que a cena renderiza. Para isso falta a rodada
 de navegador.
 
+### Dados em `src/data/`
+`chapters.json` (13 capítulos) e `presets.json` (4 paradas atmosféricas)
+saíram do literal embutido no legado. O corretor consegue reordenar ou
+renomear capítulo sem abrir código.
+
+O desenho que importa: o legado **lê** desses arquivos. Não copiei os
+valores para o JSON deixando duas cópias da mesma informação — fonte
+única, sem risco de divergirem.
+
+Verificado reconstruindo a partir do JSON e comparando com o literal do
+commit anterior: **4 paradas × 16 chaves = 64 valores de luz** e os **13
+capítulos campo a campo**, todos idênticos. Essa checagem não é
+cerimônia: estes números são a coisa mais calibrada do projeto, e um
+dígito trocado em `sunI`, `envI` ou `indoorFill` mudaria a leitura da
+casa inteira sem nenhum erro aparecer.
+
 ### Build
 `vite build` limpo. Caminho crítico: **11,8 kB de entrada + 16,7 kB de
 CSS**. `three.js` (346 kB gzip), a cena, GSAP e Howler ficam todos fora
@@ -247,6 +263,12 @@ Próxima ação: você cria o projeto e eu aplico a migração e ligo o cliente.
 `BatchedMesh`, BVH, SSR, TAA, LOD/impostores de vegetação, lightmaps
 assados, culling por portais, e `AssetManager`/`InputManager` como
 módulos próprios.
+
+**Rodada de navegador pendente.** A extração dos shaders e a dos dados
+foram verificadas por identidade textual e presença no bundle, o que
+cobre o modo de falha silencioso, mas **não** prova que a cena renderiza.
+Falta uma passada de navegador confirmando `0 erros` depois destas duas
+mudanças.
 
 ---
 
