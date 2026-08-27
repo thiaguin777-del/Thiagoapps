@@ -1,0 +1,7 @@
+{
+  "_leia": "Paradas atmosfericas do dia. Cores em #rrggbb; o resto sao numeros. Interpoladas continuamente por solarStateAt() — estes quatro pontos definem a curva inteira. Foram calibrados renderizando: mexer em sunI, envI ou indoorFill muda a leitura da casa toda.",
+  "day": {"bg": "#87ceeb", "fog": "#dbe7ef", "fogD": 0.0033, "sunC": "#fff5e6", "sunI": 5.0, "hemiSky": "#cfe2f2", "hemiGnd": "#a8906c", "hemiI": 0.3, "amb": 0.05, "exp": 0.95, "envI": 1.05, "indoorFill": 0.15, "pool": 0.0, "lamp": 0.0, "glassGlow": 0.0, "waterGlow": 0.0},
+  "golden": {"bg": "#e8a971", "fog": "#f0cfa8", "fogD": 0.004, "sunC": "#ffb066", "sunI": 3.2, "hemiSky": "#ffcc88", "hemiGnd": "#9c7550", "hemiI": 0.28, "amb": 0.05, "exp": 0.95, "envI": 0.82, "indoorFill": 0.3, "pool": 1.15, "lamp": 0.6, "glassGlow": 0.06, "waterGlow": 0.05},
+  "blue": {"bg": "#2a4a78", "fog": "#35527c", "fogD": 0.003, "sunC": "#7fa0d8", "sunI": 0.45, "hemiSky": "#4a72b0", "hemiGnd": "#3a3830", "hemiI": 0.36, "amb": 0.11, "exp": 1.1, "envI": 0.8, "indoorFill": 1.2, "pool": 1.6, "lamp": 1.0, "glassGlow": 0.09, "waterGlow": 0.15},
+  "night": {"bg": "#2b3d63", "fog": "#1b2740", "fogD": 0.0034, "sunC": "#33446a", "sunI": 0.09, "hemiSky": "#44578a", "hemiGnd": "#1a1712", "hemiI": 0.85, "amb": 0.18, "exp": 1.18, "envI": 0.91, "indoorFill": 2.4, "pool": 1.7, "lamp": 1.6, "glassGlow": 0.1, "waterGlow": 0.22}
+}

@@ -22,6 +22,8 @@
 // ============================================================
 
 import * as THREE from 'three';
+import _PRESETS_JSON from '../data/presets.json';
+import _CAPITULOS_JSON from '../data/chapters.json';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { Sky } from 'three/examples/jsm/objects/Sky.js';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
@@ -1046,12 +1048,23 @@ function setupLighting() {
 // envI é novo: escala o envMapIntensity de TODOS os materiais ao longo
 // do dia. Sem isso o céu noturno continuava iluminando a casa como se
 // fosse meio-dia, porque envMapIntensity é constante por material.
-const LP = {
-  day:    { bg: 0x87CEEB, fog: 0xdbe7ef, fogD: 0.00330, sunC: 0xfff5e6, sunI: 5.00, hemiSky: 0xcfe2f2, hemiGnd: 0xa8906c, hemiI: 0.30, amb: 0.05, exp: 0.95, envI: 1.05, indoorFill: 0.15, pool: 0.0,  lamp: 0.0,  glassGlow: 0.00, waterGlow: 0.00 },
-  golden: { bg: 0xE8A971, fog: 0xf0cfa8, fogD: 0.00400, sunC: 0xffb066, sunI: 3.20, hemiSky: 0xffcc88, hemiGnd: 0x9c7550, hemiI: 0.28, amb: 0.05, exp: 0.95, envI: 0.82, indoorFill: 0.30, pool: 1.15,  lamp: 0.6,  glassGlow: 0.06, waterGlow: 0.05 },
-  blue:   { bg: 0x2a4a78, fog: 0x35527c, fogD: 0.00300, sunC: 0x7fa0d8, sunI: 0.45, hemiSky: 0x4a72b0, hemiGnd: 0x3a3830, hemiI: 0.36, amb: 0.11, exp: 1.10, envI: 0.80, indoorFill: 1.20, pool: 1.6,  lamp: 1.0,  glassGlow: 0.09, waterGlow: 0.15 },
-  night:  { bg: 0x2b3d63, fog: 0x1b2740, fogD: 0.00340, sunC: 0x33446a, sunI: 0.09, hemiSky: 0x44578a, hemiGnd: 0x1a1712, hemiI: 0.85, amb: 0.18, exp: 1.18, envI: 0.91, indoorFill: 2.40, pool: 1.7,  lamp: 1.6,  glassGlow: 0.10, waterGlow: 0.22 },
-};
+// As paradas atmosféricas vivem em src/data/presets.json. O JSON é a
+// ÚNICA fonte: nada aqui duplica os valores, então não há como as duas
+// versões divergirem. As cores chegam como "#rrggbb" (legível e
+// editável à mão) e viram inteiro uma vez, no carregamento.
+const _CORES_LP = ['bg', 'fog', 'sunC', 'hemiSky', 'hemiGnd'];
+const LP = (() => {
+  const fora = {};
+  for (const [nome, parada] of Object.entries(_PRESETS_JSON)) {
+    if (nome.startsWith('_')) continue;
+    const d = {};
+    for (const [k, v] of Object.entries(parada)) {
+      d[k] = _CORES_LP.includes(k) ? parseInt(String(v).slice(1), 16) : v;
+    }
+    fora[nome] = d;
+  }
+  return fora;
+})();
 
 // ============================================================
 // O HELIODON — a ideia assinatura da Casa Aura
@@ -6284,50 +6297,9 @@ function buildChaptersAndHotspots() {
   // consegue VER. Auditado por auditar-visao.js contra cada parede e laje
   // opaca individualmente (o auditor antigo só testava a caixa da casa,
   // e por isso deixou passar câmeras encarando parede).
-  CONFIG.chapters = [
-    { id: 1, dur: 5, title: 'Chegada', desc: 'A aproximação pelo acesso principal.',
-      cam: { pos: [14.8, 3.0, -13], look: [9.5, 1.7, -6.5] }, light: 'day' },
-    // Panorâmicas miram a MASSA do edifício acima da laje — antes miravam
-    // um ponto interno, e a laje de cobertura ficava na frente do alvo.
-    { id: 2, dur: 5, title: 'Visão Geral', desc: 'Dois volumes em balanço, unidos por um núcleo de pedra.',
-      cam: { pos: [18, 7.5, 16], look: [-1, 4.2, 0] }, light: 'day' },
-    { id: 3, dur: 5, title: 'Fachada', desc: 'Vidro do piso ao teto, estuque claro e o forro de madeira do balanço.',
-      cam: { pos: [1, 3.0, 13.5], look: [-4, 2.6, 6.5] }, light: 'day' },
-    // Recuada: a 3,4 m a parede cega ocupava a tela inteira. Agora a
-    // porta aparece com marquise, caminho e paisagismo em volta.
-    { id: 4, dur: 5, title: 'Entrada', desc: 'Porta pivotante em madeira escura, sob marquise em concreto.',
-      cam: { pos: [12.6, 1.9, -10.2], look: [9.4, 1.5, -6.3] }, light: 'day' },
-    { id: 5, dur: 5, title: 'Sala de Estar', desc: 'Ambiente social integrado, voltado para a piscina.',
-      cam: { pos: [-8.6, 1.6, 3.2], look: [-8.8, 1.15, -2.2] }, light: 'day' },
-    // Alvo na ilha (1,1 m = altura de bancada). Antes o alvo passava ao
-    // largo dela e o piso vazio dominava o enquadramento.
-    { id: 6, dur: 5, title: 'Cozinha & Jantar', desc: 'Ilha central em bancada de pedra, mesa para seis.',
-      cam: { pos: [-2.6, 1.7, 4.2], look: [0.4, 1.10, 0.9] }, light: 'golden' },
-    { id: 7, dur: 5, title: 'Suíte Master', desc: 'Quarto principal com banheira de imersão e bancada dupla.',
-      cam: { pos: [6.6, 1.6, 3.4], look: [6.6, 1.05, -1.4] }, light: 'day' },
-    // Olha PARA o terraço com a casa atrás, em vez de atravessar o vidro
-    // e mirar um interior desfocado.
-    { id: 8, dur: 5, title: 'Terraço Superior', desc: 'Nível de cima, em balanço sobre a área social.',
-      cam: { pos: [3.2, 5.4, 6.2], look: [-2.2, 4.1, 0.6] }, light: 'golden' },
-    // CORRIGIDO renderizando: a câmera anterior ficava a 1,7 m rasando a
-    // lâmina, e nesse ângulo não se via NADA da piscina — só o muro da
-    // lâmina d'água e o reflexo do céu. Agora olha de cima para dentro
-    // da água (~20° de mergulho), que é como se fotografa piscina: o
-    // revestimento, o desnível do fundo e os degraus aparecem, e a casa
-    // ainda fecha o enquadramento atrás.
-    { id: 9, dur: 5, title: 'Piscina', desc: 'Borda infinita, deck em ipê e área gourmet coberta.',
-      cam: { pos: [-4.2, 3.3, 17.6], look: [-5.2, 0.15, 9.6] }, light: 'golden' },
-    // CORRIGIDO: antes olhava através da parede oeste E da parede de
-    // fundo. Agora percorre a faixa de jardim, paralelo à fachada.
-    { id: 10, dur: 5, title: 'Paisagismo', desc: 'Vegetação de porte médio e canteiros ao longo do perímetro.',
-      cam: { pos: [-15.5, 2.4, 11.5], look: [-12.2, 1.7, 3.0] }, light: 'day' },
-    { id: 11, dur: 5, title: 'Blue Hour', desc: 'Exterior frio, interior quente — o contraste que define a casa ao entardecer.',
-      cam: { pos: [1, 3.0, 13.5], look: [-4, 2.6, 6.5] }, light: 'blue' },
-    { id: 12, dur: 5, title: 'Anoitecer', desc: 'A mesma casa, sob luz noturna.',
-      cam: { pos: [14, 6.0, 15], look: [-1, 4.0, 0] }, light: 'night' },
-    { id: 13, dur: 5, title: 'Visão Final', desc: 'Casa Aura — projeto conceitual completo.',
-      cam: { pos: [-19, 9.0, 19], look: [-1, 4.2, 0] }, light: 'night' },
-  ];
+  // Os capítulos vivem em src/data/chapters.json — ver o comentário do LP:
+  // uma fonte só, editável sem tocar em código.
+  CONFIG.chapters = _CAPITULOS_JSON.capitulos;
 
   CONFIG.hotspots = [
     { pos: [-4.15, 2.2, 6.3], title: 'Fachada em Estuque', desc: 'Volume térreo revestido em estuque claro.' },

@@ -1,0 +1,18 @@
+{
+  "_leia": "Capitulos de navegacao. Cada camera aqui foi validada renderizando; pos e look estao em metros. Editar este arquivo reordena ou renomeia os capitulos sem tocar em codigo.",
+  "capitulos": [
+    {"id": 1, "dur": 5.0, "title": "Chegada", "desc": "A aproximação pelo acesso principal.", "cam": {"pos": [14.8, 3.0, -13.0], "look": [9.5, 1.7, -6.5]}, "light": "day"},
+    {"id": 2, "dur": 5.0, "title": "Visão Geral", "desc": "Dois volumes em balanço, unidos por um núcleo de pedra.", "cam": {"pos": [18.0, 7.5, 16.0], "look": [-1.0, 4.2, 0.0]}, "light": "day"},
+    {"id": 3, "dur": 5.0, "title": "Fachada", "desc": "Vidro do piso ao teto, estuque claro e o forro de madeira do balanço.", "cam": {"pos": [1.0, 3.0, 13.5], "look": [-4.0, 2.6, 6.5]}, "light": "day"},
+    {"id": 4, "dur": 5.0, "title": "Entrada", "desc": "Porta pivotante em madeira escura, sob marquise em concreto.", "cam": {"pos": [12.6, 1.9, -10.2], "look": [9.4, 1.5, -6.3]}, "light": "day"},
+    {"id": 5, "dur": 5.0, "title": "Sala de Estar", "desc": "Ambiente social integrado, voltado para a piscina.", "cam": {"pos": [-8.6, 1.6, 3.2], "look": [-8.8, 1.15, -2.2]}, "light": "day"},
+    {"id": 6, "dur": 5.0, "title": "Cozinha & Jantar", "desc": "Ilha central em bancada de pedra, mesa para seis.", "cam": {"pos": [-2.6, 1.7, 4.2], "look": [0.4, 1.1, 0.9]}, "light": "golden"},
+    {"id": 7, "dur": 5.0, "title": "Suíte Master", "desc": "Quarto principal com banheira de imersão e bancada dupla.", "cam": {"pos": [6.6, 1.6, 3.4], "look": [6.6, 1.05, -1.4]}, "light": "day"},
+    {"id": 8, "dur": 5.0, "title": "Terraço Superior", "desc": "Nível de cima, em balanço sobre a área social.", "cam": {"pos": [3.2, 5.4, 6.2], "look": [-2.2, 4.1, 0.6]}, "light": "golden"},
+    {"id": 9, "dur": 5.0, "title": "Piscina", "desc": "Borda infinita, deck em ipê e área gourmet coberta.", "cam": {"pos": [-4.2, 3.3, 17.6], "look": [-5.2, 0.15, 9.6]}, "light": "golden"},
+    {"id": 10, "dur": 5.0, "title": "Paisagismo", "desc": "Vegetação de porte médio e canteiros ao longo do perímetro.", "cam": {"pos": [-15.5, 2.4, 11.5], "look": [-12.2, 1.7, 3.0]}, "light": "day"},
+    {"id": 11, "dur": 5.0, "title": "Blue Hour", "desc": "Exterior frio, interior quente — o contraste que define a casa ao entardecer.", "cam": {"pos": [1.0, 3.0, 13.5], "look": [-4.0, 2.6, 6.5]}, "light": "blue"},
+    {"id": 12, "dur": 5.0, "title": "Anoitecer", "desc": "A mesma casa, sob luz noturna.", "cam": {"pos": [14.0, 6.0, 15.0], "look": [-1.0, 4.0, 0.0]}, "light": "night"},
+    {"id": 13, "dur": 5.0, "title": "Visão Final", "desc": "Casa Aura — projeto conceitual completo.", "cam": {"pos": [-19.0, 9.0, 19.0], "look": [-1.0, 4.2, 0.0]}, "light": "night"}
+  ]
+}
