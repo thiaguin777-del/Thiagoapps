@@ -17,13 +17,21 @@ export function registrarServiceWorker(): void {
   // enquanto o Vite tenta fazer hot reload.
   if (import.meta.env.DEV) return;
 
-  window.addEventListener('load', () => {
+  // NADA de esperar por `load`. Esta função é chamada no fim de um boot
+  // assíncrono que leva segundos — o evento `load` já disparou muito
+  // antes, e um listener registrado depois do evento NUNCA roda. O
+  // service worker simplesmente não era registrado, e o cache inteiro era
+  // um recurso morto que ninguém percebia porque falhar aqui é silencioso
+  // por design.
+  const registrar = () => {
     navigator.serviceWorker.register('/sw.js').catch((e) => {
       // Falhar aqui é inofensivo: sem SW a experiência funciona igual,
       // só sem cache. Nunca deixar isso escalar para o usuário.
       console.info('[sw] não registrado:', e && e.message);
     });
-  });
+  };
+  if (document.readyState === 'complete') registrar();
+  else window.addEventListener('load', registrar, { once: true });
 }
 
 /** Limpa o cache e recarrega. Alimenta o botão "Reiniciar Experiência". */

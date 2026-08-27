@@ -140,6 +140,8 @@ interface Fonte {
   pos: [number, number, number];
   volume: number;
   url: string;
+  /** Timer da pausa com fade, para poder ser cancelado ao religar. */
+  timerPausa?: number;
 }
 
 export class AudioManager {
@@ -203,11 +205,18 @@ export class AudioManager {
     this.ligado = !this.ligado;
     for (const f of this.fontes) {
       if (this.ligado) {
+        if (f.timerPausa !== undefined) {
+          window.clearTimeout(f.timerPausa);
+          f.timerPausa = undefined;
+        }
         f.som.play(f.id);
         f.som.fade(0, f.volume, 1200, f.id);
       } else {
         f.som.fade(f.som.volume(f.id) as number, 0, 700, f.id);
-        window.setTimeout(() => f.som.pause(f.id), 750);
+        // O timer PRECISA ser cancelável. Desligar e religar o som dentro
+        // de 750 ms deixava o `pause` antigo disparar em cima do som já
+        // religado: áudio mudo com o botão dizendo "Som ligado".
+        f.timerPausa = window.setTimeout(() => f.som.pause(f.id), 750);
       }
     }
     return this.ligado;

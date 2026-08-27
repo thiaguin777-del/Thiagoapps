@@ -832,7 +832,13 @@ async function init() {
 
   adaptMaterialsToQuality();
   composer = setupPostProcessing();
-  buildHotspots();
+  // buildHotspots() NAO e mais chamada: os marcadores agora sao DOM, em
+  // src/ui/HotspotManager.ts. Chamar as duas coisas punha 20 malhas 3D na
+  // cena JUNTO com os 10 marcadores em DOM — interface duplicada, clique
+  // duplicado, e a economia de draw calls que a troca prometia nunca
+  // acontecia. `hotspotMeshes` fica vazio, entao o raycast de clique e o
+  // laco de visibilidade viram no-ops sem precisar de mais nenhuma guarda.
+  // buildHotspots();
   setPct(85);
   buildNavDots();
   setPct(93);
@@ -6988,7 +6994,12 @@ function animate() {
   if (ganchosAntes) { for (let i = 0; i < ganchosAntes.length; i++) ganchosAntes[i](dt); }
 
   updateReveal(dt);
-  controls.update();
+  // OrbitControls.update() NAO respeita `enabled` — a checagem de
+  // `enabled` existe so nos handlers de evento. O update em si recalcula
+  // a posicao a partir do esferico E faz `object.lookAt(target)`, ou
+  // seja, sobrescreve tudo que o diretor de camera escreveu no quadro.
+  // Enquanto ele conduz, o orbit fica de fora do laco.
+  if (!window.__auraCameraTravada) controls.update();
   clampFreeCamera();
   if (grainPass) grainPass.uniforms.time.value = time;
   if (!Capability.reducedMotion) windUniform.value = time;
@@ -7052,7 +7063,13 @@ function animate() {
       slowFrameStreak++;
       if (slowFrameStreak >= 2) {
         slowFrameStreak = 0;
-        if (Quality.downgrade()) applyQualityDowngrade();
+        // O rebaixamento do legado fica DESLIGADO quando o
+        // QualityController tipado esta no comando. Os dois mexem em
+        // `setPixelRatio`: o legado o reescrevia a partir do tier e
+        // desfazia em silencio o degrau mais barato que o controlador
+        // achava ter aplicado — que e justamente o degrau que devolve
+        // mais desempenho.
+        if (!window.__auraQualidadeAssumida && Quality.downgrade()) applyQualityDowngrade();
       }
     } else {
       slowFrameStreak = 0;

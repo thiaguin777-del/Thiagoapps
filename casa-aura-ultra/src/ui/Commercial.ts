@@ -16,35 +16,13 @@ import { analytics } from '../core/Analytics';
 
 const SEGUNDOS_ATE_CONVITE = 60;
 
-interface Plano {
-  nome: string;
-  preco: string;
-  unidade: string;
-  itens: string[];
-  destaque?: boolean;
-}
-
-const PLANOS: Plano[] = [
-  {
-    nome: 'Avulso',
-    preco: 'sob consulta',
-    unidade: 'por imóvel',
-    itens: ['Uma residência completa', 'Até 12 capítulos', 'Link próprio', 'Entrega em 3 semanas'],
-  },
-  {
-    nome: 'Mensal',
-    preco: 'sob consulta',
-    unidade: 'por mês',
-    itens: ['Até 4 imóveis ativos', 'Trocas ilimitadas', 'Painel de métricas', 'Suporte prioritário'],
-    destaque: true,
-  },
-  {
-    nome: 'Premium',
-    preco: 'sob consulta',
-    unidade: 'por lançamento',
-    itens: ['Portfólio inteiro', 'Domínio do incorporador', 'Integração com CRM', 'Acompanhamento dedicado'],
-  },
-];
+// NAO existe aqui uma lista de planos. Ela ficava aqui, com precos "sob
+// consulta" e itens como "Integracao com CRM" que EU inventei — e o
+// index.html ja traz o bloco `.plans` com os precos reais que o Thiago
+// definiu. O resultado eram duas tabelas de preco contraditorias na mesma
+// tela, e a minha ainda anunciava condicao comercial que ninguem
+// combinou. Termo comercial nao se inventa: este modulo agora so
+// ENRIQUECE o bloco que ja existe.
 
 /** Contador que sobe até o alvo. Substitui a dependência countUp.js. */
 function contarAte(el: HTMLElement, alvo: number, sufixo = '', duracao = 1.6): void {
@@ -64,26 +42,27 @@ export function montarComercial(fsm: StateMachine): void {
   const painel = document.getElementById('commercial');
   if (!painel) return;
 
-  // ---- planos ----
-  const grade = painel.querySelector('#planos') || (() => {
-    const d = document.createElement('div');
-    d.id = 'planos';
-    painel.appendChild(d);
-    return d;
-  })();
-  grade.innerHTML = PLANOS.map((p) => `
-    <article class="plano${p.destaque ? ' destaque' : ''}">
-      <h4>${p.nome}</h4>
-      <p class="plano-preco">${p.preco}<span>${p.unidade}</span></p>
-      <ul>${p.itens.map((i) => `<li>${i}</li>`).join('')}</ul>
-      <button class="hero-btn primary plano-cta" data-plano="${p.nome}">Falar sobre o ${p.nome}</button>
-    </article>`).join('');
+  // ---- planos: o bloco real do HTML, com um CTA por plano ----
+  // Os precos e as descricoes sao os do markup. O que este trecho
+  // acrescenta e um botao por plano que leva ao WhatsApp ja dizendo QUAL
+  // plano interessou — que e a informacao que faltava chegar do outro
+  // lado da conversa.
+  const grade = painel.querySelector<HTMLElement>('.plans');
+  grade?.querySelectorAll<HTMLElement>('.plan').forEach((card) => {
+    const nome = card.querySelector('.plan-name')?.textContent?.trim() || 'plano';
+    if (card.querySelector('.plano-cta')) return;
+    const b = document.createElement('button');
+    b.className = 'hero-btn primary plano-cta';
+    b.dataset.plano = nome;
+    b.textContent = `Falar sobre o ${nome}`;
+    card.appendChild(b);
+  });
 
   // ---- tilt 3D no hover ----
   // Só em ponteiro fino: num toque isto não existe, e tentar simular
   // deixa o card tremendo enquanto a pessoa rola a página.
   if (window.matchMedia('(pointer: fine)').matches) {
-    grade.querySelectorAll<HTMLElement>('.plano').forEach((card) => {
+    grade?.querySelectorAll<HTMLElement>('.plan').forEach((card) => {
       card.addEventListener('pointermove', (e) => {
         const r = card.getBoundingClientRect();
         const dx = (e.clientX - r.left) / r.width - 0.5;
@@ -113,7 +92,7 @@ export function montarComercial(fsm: StateMachine): void {
   painel.querySelectorAll<HTMLElement>('[data-alvo]').forEach((el) => obs.observe(el));
 
   // ---- CTA WhatsApp com mensagem pré-preenchida ----
-  grade.querySelectorAll<HTMLElement>('.plano-cta').forEach((b) => {
+  grade?.querySelectorAll<HTMLElement>('.plano-cta').forEach((b) => {
     b.addEventListener('click', () => {
       const plano = b.dataset.plano || '';
       analytics.registrar('cta_plano', { plano });
@@ -130,8 +109,20 @@ export function montarComercial(fsm: StateMachine): void {
       painel.scrollIntoView({ behavior: 'auto' });
     });
   };
-  document.querySelectorAll('[data-abrir-comercial]').forEach((b) =>
-    b.addEventListener('click', abrir));
+  // `[data-abrir-comercial]` nao existe em lugar nenhum do HTML: este
+  // laco percorria uma lista vazia e o painel nao tinha botao de entrada.
+  // Quem abre o comercial no markup herdado e `#btn-commercial`; o
+  // convite de 60 s e o fim da apresentacao tambem chamam `abrir()`.
+  document.querySelectorAll('#btn-commercial, [data-abrir-comercial]')
+    .forEach((b) => b.addEventListener('click', abrir));
+
+  // FECHAR: o `#comm-close` do legado so tira a classe `.visible`, sem
+  // avisar a FSM. O estado ficava presoem COMMERCIAL e, a partir dai, a
+  // tabela de transicoes recusava "Apresentacao" para sempre.
+  document.getElementById('comm-close')?.addEventListener('click', () => {
+    if (fsm.atual() !== 'COMMERCIAL') return;
+    fsm.ir('EXPLORING', () => painel.classList.remove('visible'));
+  });
 
   // ---- convite após 60 s EXPLORANDO ----
   let segundos = 0;

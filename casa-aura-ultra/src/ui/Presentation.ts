@@ -77,6 +77,8 @@ class Apresentacao {
   private barraEl: HTMLElement | null = null;
   private rodando = false;
   private indice = 0;
+  /** Onde a fatia atualmente tocando começa dentro de PLANOS. */
+  private inicioDaFatia = 0;
   aoTerminar: (() => void) | null = null;
 
   montar(fsm: StateMachine, cena: CenaMinima): void {
@@ -121,11 +123,19 @@ class Apresentacao {
     const ok = await this.fsm.ir('PRESENTATION', () => {
       document.getElementById('hero')?.classList.add('hidden');
       document.body.dataset.mode = 'present';
+      // O legado tem o PROPRIO conceito de estado, e `clampFreeCamera()`
+      // consulta ele: fora de 'cinematic'/'presenting' ela empurra a
+      // camera para fora do envelope da casa a cada quadro. Sem esta
+      // linha os dois planos INTERNOS do roteiro ("O estar" e "Cozinha e
+      // jantar") eram revertidos assim que a camera entrava, e nunca
+      // podiam ser alcancados.
+      this.cena?.Experience?.set?.('presenting');
     });
     if (!ok) return;
 
     this.rodando = true;
     this.indice = 0;
+    this.inicioDaFatia = 0;
     this.legendaEl?.classList.add('visivel');
     diretor.reproduzir(PLANOS);
   }
@@ -137,14 +147,18 @@ class Apresentacao {
     // diretor sempre parte da posição ATUAL da câmera, então cortar a
     // lista já entrega o movimento certo.
     this.indice = i;
+    this.inicioDaFatia = i;
     diretor.reproduzir(PLANOS.slice(i));
   }
 
   private mostrarLegenda(iRelativo: number, p: PlanoRoteiro): void {
-    // `iRelativo` conta dentro da fatia que está tocando; o índice real
-    // é o começo da fatia mais ele.
-    const base = this.indice - 0;
-    const real = Math.min(PLANOS.length - 1, base + iRelativo);
+    // `iRelativo` conta dentro da FATIA que está tocando; o índice real é
+    // o começo da fatia mais ele. Guardar isso em `this.indice` não é
+    // opcional: `pular()` parte de `this.indice`, e enquanto ele só era
+    // escrito dentro do próprio `pular()`, assistir três planos e apertar
+    // "próximo" voltava o filme para o plano 1 em vez de avançar.
+    const real = Math.min(PLANOS.length - 1, this.inicioDaFatia + iRelativo);
+    this.indice = real;
     if (!this.legendaEl) return;
 
     this.legendaEl.classList.remove('visivel');

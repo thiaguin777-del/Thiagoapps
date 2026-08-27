@@ -52,15 +52,19 @@ class Analytics {
 
   resumo(): Record<string, unknown> {
     const hotspots = this.eventos.filter((e) => e.nome === 'hotspot').length;
-    const qualidades = this.eventos.filter((e) => e.nome === 'qualidade')
-      .map((e) => String(e.dados.tier));
+    // `dados.tier` NUNCA existiu: o QualityController emite
+    // {nivel, oque, fps}. O resumo reportava a string literal "undefined"
+    // em tiers_visitados e tier_final — telemetria que parecia funcionar e
+    // não media nada.
+    const degraus = this.eventos.filter((e) => e.nome === 'qualidade')
+      .map((e) => Number(e.dados.nivel));
     return {
       sessao: this.sessao,
       duracao_s: +((performance.now() - this.inicio) / 1000).toFixed(1),
       tempo_por_capitulo: this.tempoPorCapitulo(),
       hotspots_abertos: hotspots,
-      tiers_visitados: [...new Set(qualidades)],
-      tier_final: qualidades[qualidades.length - 1] ?? null,
+      degraus_de_qualidade: [...new Set(degraus)],
+      degrau_final: degraus.length ? degraus[degraus.length - 1] : 0,
       eventos: this.eventos.length,
     };
   }

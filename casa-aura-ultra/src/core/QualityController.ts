@@ -52,6 +52,11 @@ export class QualityController {
 
   ligar(alvo: Alvo): void {
     this.alvo = alvo;
+    // Avisa o legado para ele parar de mexer no pixelRatio: dois
+    // auto-scalers no mesmo renderizador brigam, e o do legado vencia
+    // reescrevendo o valor a partir do tier.
+    (window as unknown as { __auraQualidadeAssumida?: boolean })
+      .__auraQualidadeAssumida = true;
     this.travado = new URLSearchParams(location.search).has('q');
     if (this.travado) {
       console.info('[qualidade] auto-scaler DESLIGADO por ?q= — modo auditoria');

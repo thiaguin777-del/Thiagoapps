@@ -32,11 +32,20 @@ class Hud {
   }
 
   /**
-   * `#btn-reveal` já tem o listener do legado, que ergue o volume
-   * superior. Esse efeito é bom e continua existindo — mas agora ele
-   * ganha um companheiro. A interceptação é por captura no `document`,
-   * antes de o evento chegar ao botão, o mesmo mecanismo usado na
-   * apresentação: não edita o legado e é reversível.
+   * `#btn-reveal` tinha o listener do legado, que ergue o volume superior
+   * ("a maquete que abre"). A interceptação por captura no `document`
+   * para o evento ANTES de ele chegar ao botão — ou seja, aquele efeito
+   * deixou de ser alcançável.
+   *
+   * Escrevi aqui, antes, que ele "continua existindo". Não continua: um
+   * botão só, um comportamento só. A troca é deliberada — a seção com
+   * plano de corte mostra a distribuição melhor do que erguer a laje, e
+   * ter dois modos disputando o mesmo botão seria pior que qualquer um
+   * dos dois. Mas o comentário anterior descrevia algo que o código não
+   * fazia, que é justamente o defeito que este projeto persegue.
+   *
+   * `toggleReveal` segue exportada e funcional para quem quiser religá-la
+   * num botão próprio.
    */
   private assumirBotaoHerdado(): void {
     document.addEventListener('click', (e) => {

@@ -71,6 +71,8 @@ interface EstadoFoco {
   alvoAbertura: number;
   /** Segundos restantes da transição em curso. */
   restante: number;
+  /** Abertura no MEIO da viagem; nas pontas ela volta ao padrão. */
+  aberturaDePico: number;
   duracao: number;
   deFoco: number;
   deAbertura: number;
@@ -86,6 +88,7 @@ export class PostProcessing {
     foco: 12, abertura: ABERTURA_PADRAO,
     alvoFoco: 12, alvoAbertura: ABERTURA_PADRAO,
     restante: 0, duracao: 0, deFoco: 12, deAbertura: ABERTURA_PADRAO,
+    aberturaDePico: ABERTURA_PADRAO,
   };
 
   aprimorar(alvo: AlvoPos): void {
@@ -199,7 +202,14 @@ export class PostProcessing {
     e.deFoco = e.foco;
     e.deAbertura = e.abertura;
     e.alvoFoco = distancia;
-    e.alvoAbertura = abertura;
+    // A abertura ABRE durante a viagem e FECHA de volta ao chegar. Antes
+    // ela só abria: o primeiro rack focus deixava a lente em 2,6x a
+    // abertura calibrada e o resto do filme inteiro rodava com a
+    // profundidade de campo errada, cada vez mais rasa a cada plano.
+    // Uma lente real volta ao diafragma de trabalho quando o operador
+    // solta o foco.
+    e.alvoAbertura = ABERTURA_PADRAO;
+    e.aberturaDePico = abertura;
     e.duracao = Math.max(0.05, duracao);
     e.restante = e.duracao;
   }
@@ -222,7 +232,13 @@ export class PostProcessing {
       // linear é a assinatura de foco automático, não de foco humano.
       const s = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
       e.foco = e.deFoco + (e.alvoFoco - e.deFoco) * s;
-      e.abertura = e.deAbertura + (e.alvoAbertura - e.deAbertura) * s;
+      // Sino: fechada -> aberta no meio -> fechada. `sin(pi*t)` vale 0
+      // nas duas pontas e 1 no meio, que é exatamente o comportamento de
+      // um diafragma acompanhando uma puxada de foco.
+      const sino = Math.sin(Math.PI * t);
+      e.abertura = e.deAbertura
+        + (e.alvoAbertura - e.deAbertura) * s
+        + (e.aberturaDePico - ABERTURA_PADRAO) * sino;
     }
     this.aplicar();
   }

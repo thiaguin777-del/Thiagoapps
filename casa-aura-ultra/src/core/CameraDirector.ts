@@ -109,6 +109,12 @@ export class CameraDirector {
     this.indice = -1;
     this.rodando = true;
     if (this.controls) this.controls.enabled = false;
+    // `enabled = false` NAO basta: o laco do legado chama
+    // `controls.update()` todo quadro, e esse metodo ignora `enabled` e
+    // termina com `object.lookAt(target)`. Sem esta trava o slerp de
+    // orientacao — o recurso principal deste modulo — era sobrescrito a
+    // cada quadro e simplesmente nao existia na tela.
+    (window as unknown as { __auraCameraTravada?: boolean }).__auraCameraTravada = true;
     this.proximo();
   }
 
@@ -122,6 +128,7 @@ export class CameraDirector {
     if (!this.rodando) return;
     this.rodando = false;
     this.curva = null;
+    (window as unknown as { __auraCameraTravada?: boolean }).__auraCameraTravada = false;
     if (this.camera && this.controls) {
       this.camera.getWorldDirection(_v);
       this.controls.target.copy(this.camera.position).addScaledVector(_v, 6);

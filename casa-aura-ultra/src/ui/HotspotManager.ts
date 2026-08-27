@@ -4,6 +4,12 @@
 // Antes eram malha 3D: uma esfera de 10 cm mais um anel, dentro do
 // scene graph. Três problemas medidos na versão anterior:
 //
+// (Nota: por um tempo este arquivo AFIRMOU que a versão 3D tinha saído,
+// e ela não tinha — `buildHotspots()` continuava sendo chamada no boot do
+// legado, então a cena carregava as 20 malhas E os 10 marcadores em DOM
+// ao mesmo tempo. A chamada foi removida; o comentário abaixo só passou a
+// ser verdade depois disso.)
+//
 //  1. Custavam 20 draw calls e 20 materiais — para UI.
 //  2. Ficavam sujeitos à profundidade da cena, então um marcador atrás de
 //     uma parede sumia, e um marcador perto do sofá aparecia FLUTUANDO na
@@ -26,6 +32,8 @@ interface Ponto {
   desc: string;
 }
 
+const _dir = new THREE.Vector3();
+
 interface CenaMinima {
   scene: THREE.Scene;
   camera: THREE.PerspectiveCamera;
@@ -39,6 +47,7 @@ class Gerenciador {
   private rc = new THREE.Raycaster();
   private ativo = false;
   private ultimoTeste = 0;
+  private alvosDeOclusao: THREE.Object3D[] = [];
   public aoAbrir: ((titulo: string) => void) | null = null;
 
   async iniciar(): Promise<void> {
@@ -59,6 +68,18 @@ class Gerenciador {
     this.camadaEl.style.cssText =
       'position:fixed;inset:0;pointer-events:none;z-index:40;overflow:hidden';
     document.body.appendChild(this.camadaEl);
+
+    // Lista de oclusores montada UMA vez: só malhas da casa, sem
+    // vegetação, sem partículas, sem os feixes volumétricos. Percorrer o
+    // grafo inteiro a cada teste era o grosso do custo, e a maior parte
+    // dele em objetos que nunca escondem um marcador.
+    this.alvosDeOclusao = [];
+    cena.scene.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (!m.isMesh || !m.visible) return;
+      if (m.userData?.tipo || m.name.startsWith('casaAura_')) return;
+      this.alvosDeOclusao.push(m);
+    });
 
     const pontos = cena.CONFIG?.hotspots || [];
     pontos.forEach((p) => this.criar(p));
@@ -105,13 +126,17 @@ class Gerenciador {
         continue;
       }
       if (testarOclusao) {
-        const dir = it.v.clone().sub(camera.position);
+        const dir = _dir.copy(it.v).sub(camera.position);
         const dist = dir.length();
         this.rc.set(camera.position, dir.normalize());
         this.rc.far = dist - 0.25;   // margem: não colidir com o próprio alvo
-        const bateu = this.rc.intersectObject(this.cena.scene, true)
-          .some((h) => h.object.visible && (h.object as THREE.Mesh).isMesh);
-        it.el.dataset.oculto = bateu ? '1' : '';
+        // `firstHitOnly`: basta saber SE existe parede no caminho, e não
+        // quais. Sem isto o raycaster ordena todos os acertos do grafo
+        // inteiro. Com 10 marcadores a 8 Hz isso eram até 80 varreduras
+        // completas por segundo — em cima dos aparelhos móveis que o
+        // resto do projeto passa o tempo tentando proteger.
+        const acertos = this.rc.intersectObjects(this.alvosDeOclusao, false);
+        it.el.dataset.oculto = acertos.length ? '1' : '';
       }
       if (it.el.dataset.oculto === '1') {
         it.el.style.display = 'none';

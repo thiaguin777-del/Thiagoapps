@@ -225,13 +225,26 @@ async function ligarAudio(cena: {
     const w = window as unknown as { __auraAntesDoQuadro?: ((dt: number) => void)[] };
     if ((w as { __auraOuvinte?: boolean }).__auraOuvinte) return;
     (w as { __auraOuvinte?: boolean }).__auraOuvinte = true;
-    const frente = { x: 0, y: 0, z: -1 };
+    // Vector3 DE VERDADE, e não `{x,y,z}`: `getWorldDirection` chama
+    // `target.set(...)` no que recebe. Com um objeto simples isso lança
+    // TypeError dentro do gancho por quadro, o `WebGLAnimation` do three
+    // nunca volta a pedir o quadro seguinte, e a cena CONGELA PARA
+    // SEMPRE — na primeira vez que o cliente liga o som. Era o defeito
+    // mais grave do projeto e estava escondido atrás de um botão.
+    const { Vector3 } = await import('three');
+    const frente = new Vector3(0, 0, -1);
     w.__auraAntesDoQuadro?.push(() => {
-      cam.getWorldDirection(frente);
-      audioMod?.audio.atualizarOuvinte(
-        cam.position.x, cam.position.y, cam.position.z,
-        frente.x, frente.y, frente.z,
-      );
+      // O gancho roda dentro do laço de render do legado, que não tem
+      // try/catch: qualquer exceção aqui mata a animação inteira.
+      try {
+        cam.getWorldDirection(frente);
+        audioMod?.audio.atualizarOuvinte(
+          cam.position.x, cam.position.y, cam.position.z,
+          frente.x, frente.y, frente.z,
+        );
+      } catch (e) {
+        console.error('[audio] ouvinte falhou, seguindo sem espacializacao', e);
+      }
     });
   });
 }
