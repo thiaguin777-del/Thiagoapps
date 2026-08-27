@@ -28,6 +28,51 @@ Para medir desempenho de verdade: abrir no aparelho alvo e ler
 
 ---
 
+## Verificação final em navegador
+
+Feita depois da revisão de código e dos 15 consertos. Tudo abaixo é
+medido, não inferido.
+
+| verificação | resultado |
+|---|---|
+| erros de console e de página | **0** |
+| estado alcançado | `HERO` → marco `pronto` |
+| malhas na cena | **154** (eram 174) |
+| anti-aliasing | `msaa` |
+| feixes volumétricos | 4 construídos, 3 acesos ao amanhecer, 4 na hora dourada (0,42), 0 à noite |
+| marcadores | 10, todos em DOM |
+| CTAs de plano | 3, ligados aos planos reais (Avulso / Mensal / Premium) |
+| grid de planos inventado | removido |
+
+**A queda de 174 para 154 malhas são exatamente as 20 malhas de hotspot
+duplicadas** que a revisão apontou — a contagem bate com a previsão.
+
+### O defeito que congelava a cena
+Era o mais grave do projeto e ficava escondido atrás do botão de som.
+Medido contando quadros com `requestAnimationFrame`:
+
+| | quadros em 20 s |
+|---|---|
+| antes de ligar o som | 4 |
+| depois de ligar o som | **4** |
+
+Quatro quadros em vinte segundos é o renderizador em software; o que
+importa é que **continua contando**. Com o defeito, a contagem ia a zero
+e não voltava nunca — `getWorldDirection()` lançava dentro do gancho por
+quadro e o `WebGLAnimation` do three parava de pedir quadros.
+
+### Modo Apresentação
+Aos 24 s da entrada: `travada: true`, orbit desligado, legenda "Chegada",
+progresso 12,5%, `Experience.state === 'presenting'`. Os três consertos
+(trava do orbit, estado do legado, índice) funcionando juntos.
+
+Na primeira amostragem, aos 12 s, `travada` ainda era `false` e a legenda
+estava vazia — **não era defeito**: o fade de 400 ms da FSM depende de
+`setTimeout`, e a 0,2 quadro por segundo os temporizadores só disparam
+nas frestas entre quadros. Confirmado esperando mais.
+
+---
+
 ## IMPLEMENTADO E MEDIDO
 
 ### Anti-aliasing — era um defeito real, não uma melhoria
@@ -264,11 +309,8 @@ Próxima ação: você cria o projeto e eu aplico a migração e ligo o cliente.
 assados, culling por portais, e `AssetManager`/`InputManager` como
 módulos próprios.
 
-**Rodada de navegador pendente.** A extração dos shaders e a dos dados
-foram verificadas por identidade textual e presença no bundle, o que
-cobre o modo de falha silencioso, mas **não** prova que a cena renderiza.
-Falta uma passada de navegador confirmando `0 erros` depois destas duas
-mudanças.
+*(A rodada de navegador que faltava foi feita — ver "Verificação final"
+no topo. Zero erros.)*
 
 ---
 
