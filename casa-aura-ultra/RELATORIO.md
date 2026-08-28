@@ -47,6 +47,8 @@ medido, não inferido.
 **A queda de 174 para 154 malhas são exatamente as 20 malhas de hotspot
 duplicadas** que a revisão apontou — a contagem bate com a previsão.
 
+---
+
 ### O defeito que congelava a cena
 Era o mais grave do projeto e ficava escondido atrás do botão de som.
 Medido contando quadros com `requestAnimationFrame`:
@@ -70,6 +72,214 @@ Na primeira amostragem, aos 12 s, `travada` ainda era `false` e a legenda
 estava vazia — **não era defeito**: o fade de 400 ms da FSM depende de
 `setTimeout`, e a 0,2 quadro por segundo os temporizadores só disparam
 nas frestas entre quadros. Confirmado esperando mais.
+
+---
+
+## Linha de base medida (tier `ultra`, build de produção)
+
+Colhida com `renderer.info.autoReset = false` e um `reset()` imediatamente
+antes do quadro medido. Sem isso, `info.render.calls` devolve as chamadas
+do **último passe do composer** — um quad de tela cheia, ou seja `1`. A
+primeira versão desta varredura reportou exatamente esse `1`, que não é
+uma medição de nada.
+
+| grandeza | valor |
+|---|---|
+| malhas simples (inclui `Points`) | 138 |
+| malhas instanciadas | 20 |
+| triângulos no grafo | 124 409 |
+| **triângulos desenhados por quadro** | **967 372** |
+| **chamadas de desenho por quadro** | **1 082** |
+| materiais / geometrias / texturas | 101 / 137 / 60 |
+| luzes / com sombra | 17 / 1 |
+| malhas que projetam sombra | 38 |
+| programas compilados | 63 |
+| passes do composer | 7 (o de DOF entra desligado fora do modo cinema) |
+| pixelRatio | 1 |
+
+O número que importa é a razão **967 mil desenhados / 124 mil no grafo ≈
+7,8×**. Ela vem de três lugares somados: o passe de sombra (38 emissores),
+o passe de transmissão do vidro (o Three.js redesenha a cena opaca inteira
+para o alvo de transmissão) e os passes de tela cheia. É o argumento
+concreto para o vidro com `transmission` continuar restrito a `ultra`/
+`high`, como já está.
+
+> **A contagem de malhas não é comparável com o "154" da tabela acima.**
+> São regras de contagem diferentes: aquela somava `isMesh` (e
+> `InstancedMesh` também tem `isMesh === true`); esta separa instanciadas
+> das demais. Não trate a diferença como regressão — nenhuma das duas foi
+> recontada com a regra da outra.
+
+---
+
+## Varredura visual — o que a imagem denunciou
+
+Método: build de produção servido por `vite preview` (não o dev server —
+editar um arquivo recarregava a página no meio da captura e invalidava a
+comparação), quatro câmeras fixas, e uma sonda de pixels que devolve
+mínimo, máximo, mediana, média e desvio de luminância de um retângulo.
+
+Duas armadilhas do próprio instrumento, encontradas antes dos defeitos:
+
+- **`controls.enabled = false` não segura a câmera.** Em `OrbitControls`
+  os `return` por `enabled` estão só nos handlers de evento; `update()`
+  recalcula a posição a partir do esférico e termina em
+  `object.lookAt(target)`. A captura "sala-interior" saiu como vista
+  aérea externa: mexi no alvo, e o próximo `update()` devolveu a câmera
+  para o mesmo raio em volta dele. A guarda certa é
+  `window.__auraCameraTravada`, que o laço do legado já respeita.
+- **`info.render.calls` lido depois do composer devolve `1`** (o quad do
+  último passe). Ver a seção da linha de base.
+
+### 1. A cobertura lia como água — CORRIGIDO E MEDIDO
+
+O maior defeito do quadro exterior: a laje de cobertura, ~25% da imagem,
+aparecia azul-marinho e ondulada.
+
+| região da manta | antes | depois |
+|---|---|---|
+| R / G / B médios | 76,6 / 87,3 / **103,2** | **51,5** / 46,7 / 46,1 |
+| razão B ÷ R | **1,35** | **0,90** |
+| mediana de luminância | 81,3 | 33,3 |
+
+O albedo do material (`#34343a`) tem B ÷ R = 1,12. Antes a superfície era
+*muito mais azul que o próprio albedo* — ou seja, o que se via era o céu
+refletido, não a manta. Depois ela lê um pouco mais quente que o albedo,
+que é o que a luz do sol faz. Causa única: `roughness 0,52` +
+`metalness 0,12` + `envMapIntensity` cheia transformavam a laje em
+espelho.
+
+Registro de um erro meu no caminho: escrevi no código que havia **três**
+causas, incluindo escala errada de `map` e de `normalMap`. As duas eram
+invenção — `sharedBox` passa por `applyWorldUV`, e a UV já vem em metros
+(`TILE_M = 1,6`), então a emenda de rolo já caía na largura real do rolo.
+Cheguei a trocar as duas por valores piores antes de ler `applyWorldUV`.
+O comentário no código foi corrigido para dizer isso.
+
+Aproveitando: `M.grafite` servia a manta E ao rufo/capeamento do
+parapeito, que na obra são materiais diferentes. Agora são dois, e os
+mapas dos dois entraram na lista de anisotropia — nenhum dos dois estava
+lá, numa superfície que só é vista em ângulo rasante.
+
+### 2. Perspectiva aérea com degrau — CORRIGIDO
+
+Medido acima e abaixo da linha do horizonte:
+
+| faixa | distância | desvio de luminância |
+|---|---|---|
+| colina distante | 225–435 m | **5,2** |
+| faixa de mata | 46–158 m | **33,0** |
+
+Seis vezes mais contraste local **na frente** de um fundo já quase
+apagado. A névoa não estava errada; a massa arbórea é que **terminava** em
+158 m. Com `FogExp2(0,0033)`: 158 m → 24% de névoa, 225 m → 62%. Entre um
+e outro, 67 m de nada, justo onde a curva é mais íngreme.
+
+Corrigido preenchendo a faixa (dois anéis a mais, até ~218 m, com porte
+crescente), não mexendo na névoa. Fora de `low` e `medium` — a conta de
+custo de preenchimento está no comentário do código.
+
+Conferido reimplementando a distribuição dos anéis e cruzando com a curva
+de névoa:
+
+| faixa | névoa | árvores antes | depois |
+|---|---|---|---|
+| 125–150 m | 19% | 182 | 180 |
+| 150–175 m | 25% | 93 | 232 |
+| **175–200 m** | 32% | **0** | **236** |
+| **200–225 m** | 39% | **0** | **303** |
+| 225–250 m | 46% | (relevo) | (relevo) |
+
+**Maior salto de névoa entre duas faixas povoadas: 20,9 pontos
+percentuais antes, 7,1 depois.** É a medida direta do degrau de
+perspectiva aérea, e ele caiu para um terço.
+
+### 3. Galhos como varas de madeira — CORRIGIDO
+
+Ampliando o canto inferior direito: os galhos da árvore de primeiro plano
+atravessavam a fachada como canos serrados, sem uma folha em volta.
+
+Não era material nem geometria (o tronco já é cônico). Era o envelope:
+
+    copa:  casca de cartões entre 0,78 e 1,00 de canopyR
+    galho: alcance horizontal até 1,22 de canopyR  -> FORA da copa
+    galho: base em 0,62 de trunkH, copa começa em trunkH - 0,26*canopyR
+                                                   -> nasce ABAIXO dela
+
+O galho nascia abaixo da folhagem e terminava fora dela, com a ponta
+contra o céu. Encurtado e com a origem mais alta, a ponta termina dentro
+da casca de folhas.
+
+Conferido reimplementando o mesmo sorteio em JS, 200 mil árvores, e
+testando a ponta contra o elipsoide da copa:
+
+| | antes | depois |
+|---|---|---|
+| ponta do galho **fora** da copa | 38,3% | **0,4%** |
+| pior caso (1,0 = na casca da copa) | 4,34 | **1,39** |
+| galho nasce abaixo da copa | 94,8% | 51,6% |
+
+A última linha continua alta **de propósito**: galho de árvore sai do
+tronco abaixo da massa de folhas mesmo. O defeito era a PONTA no céu, e
+essa saiu de 38% para praticamente zero.
+
+### 4. O núcleo em pedra lia como bloco de concreto — ALTERADO, CONFIRMAÇÃO VISUAL PENDENTE
+
+O elemento herói do projeto aparecia como muro de blocos: retângulos
+creme lisos com junta de fio claro.
+
+**Não era falta de variação de tom** — a sonda mediu desvio 18,3 na
+região, e o gerador já sorteia tom peça a peça. Eram outras duas coisas:
+
+- A junta tinha 9 mm num mapa de 512 px cobrindo 1,6 m. Nessa distância a
+  parede ocupa ~114 px/m, então a junta caía em **um pixel de tela**: o
+  mipmap a dissolvia e sobrava o lábio claro do normal map, não o vinco.
+  Junta de pedra precisa ser escura mesmo com 1 px — e quem faz isso é o
+  albedo, não o relevo.
+- `baseFreq: 6` sobre 1,6 m dá feições de 27 cm: grosso demais para grão,
+  fino demais para veio. Cada peça saía um degradê limpo, sem superfície.
+
+A junta passou de 9 mm para 1,9 cm (de ~1,1 para ~2,1 px de tela nesta
+distância) e `albedoCavity` de 0,50 para 0,60, para ela ser escura no
+albedo e não depender do relevo. `baseFreq` foi de 6 para 12 e ganhou uma
+quinta oitava. **Diferente dos outros três itens, este ainda não tem
+confirmação por imagem** — a varredura que a produz não terminou até o
+fechamento deste texto.
+
+### Encontrado, reproduzido e NÃO corrigido
+
+- **Trama regular no gramado.** Volta a aparecer em ângulo rasante, apesar
+  do conserto anterior (`noiseNormalTexture(8)` → `(24, 1.15)`). A
+  hipótese é moiré por subamostragem: `map.repeat` 450 e `normalMap.repeat`
+  317 sobre o disco de 260 m, com anisotropia limitada a 8 de um máximo de
+  16. **UNMEASURED — REQUIRES TARGET HARDWARE**: a filtragem de textura do
+  SwiftShader não representa a de uma GPU real, então subir a anisotropia
+  aqui não provaria nada. Precisa de uma passada em GPU antes de mexer.
+- **Manchas brancas no vidro.** Elipses suaves sobre o guarda-corpo e o
+  pano de vidro, com cara de mancha e não de brilho. Origem não
+  determinada (candidatos: especular de `PointLight` espalhada pelo bloom,
+  ou as `RectAreaLight` das janelas). Não mexido sem saber a causa.
+- **A cena não é determinística.** A vegetação usa `Math.random()` sem
+  semente, então cada carregamento gera uma floresta diferente. Isso torna
+  A/B de qualquer coisa perto de vegetação pouco confiável — as medições
+  acima foram escolhidas para não depender disso (razão de canal na mesma
+  superfície, desvio dentro de uma faixa). Semear o gerador é a próxima
+  ação óbvia, e não foi feita nesta rodada para não trocar a aparência de
+  toda a vegetação junto com quatro outras mudanças.
+
+### Verificado como CORRETO — não mexer
+
+Duas coisas que o enunciado alertava e que **já estavam certas**:
+
+- O relevo distante é baixo, hazeado e proporcional (225–435 m, 16–50 m de
+  altura). Não é o erro histórico de "montanhas gigantes e próximas".
+- A vegetação usa cartões instanciados com recorte alfa, não esferas.
+
+E uma terceira, que quase "corrigi" por engano: o guarda-corpo de vidro do
+terraço **não** está opaco. O cinza que se vê através dele é a parede
+clara que está atrás. `transmission` funciona (dá para ver o mobiliário
+através do pano térreo) e o fallback opaco de `adaptMaterialsToQuality()`
+não se aplica em `ultra` (`if (q.glass === 'full') return`).
 
 ---
 

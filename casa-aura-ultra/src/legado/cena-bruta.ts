@@ -2866,14 +2866,46 @@ function buildMaterials() {
       normalMap: (() => { const t = noiseNormalTexture(10, 0.8); t.repeat.set(1, 1); return t; })(),
       normalScale: new THREE.Vector2(0.2, 0.2),
       roughness: 0.88, metalness: 0 }),
+    // ACHADO NA VARREDURA DE QA (captura `qa-exterior-dia`): a cobertura
+    // ocupa ~25% do quadro e LIA COMO ÁGUA — azul-marinho com ondulação.
+    //
+    // Escrevi aqui, na primeira tentativa de correção, que havia três
+    // causas: o brilho, um normalMap em escala errada e um `map` esticado.
+    // As duas últimas eram INVENÇÃO minha: `sharedBox` passa por
+    // `applyWorldUV`, então toda face de caixa já vem com UV em METROS
+    // (TILE_M = 1,6). A emenda de rolo já caía a cada 1,6 m — a largura
+    // real do rolo — e o `repeat(2,2)` do normalMap já dava célula de
+    // ~4 cm. Estava certo. Cheguei a "corrigir" os dois para valores
+    // piores antes de ler `applyWorldUV`.
+    //
+    // A causa é UMA: `roughness 0,52` + `metalness 0,12` + envMap na
+    // intensidade cheia = espelho. A manta é quase neutra (#34343a), então
+    // TODO o azul vinha do reflexo do céu, e as manchas de envelhecimento
+    // da textura modulando esse reflexo é que produziam a "ondulação".
+    // O comentário antigo dizia que o brilho existia para a laje "não
+    // morrer em preto" — a intenção estava certa, a dose é que estava
+    // alta demais.
+    //
+    // O material também servia a duas coisas que na obra são materiais
+    // diferentes: a MANTA da laje e o rufo/capeamento do parapeito.
+    // Separados, a manta pode ir para fosco total sem levar junto o
+    // capeamento, que é chapa e legitimamente tem um resto de brilho.
+
+    // Rufos, pingadeiras e capeamento de parapeito: chapa escura fosca.
     grafite:      new THREE.MeshStandardMaterial({
+      map: stuccoNoiseTexture('#3a3a3f'),
+      normalMap: (() => { const t = noiseNormalTexture(18, 0.9); t.repeat.set(2, 2); return t; })(),
+      normalScale: new THREE.Vector2(0.22, 0.22),
+      roughness: 0.72, metalness: 0.05, envMapIntensity: 0.55 }),
+    // Manta impermeabilizante da laje principal.
+    manta:        new THREE.MeshStandardMaterial({
       map: roofMembraneTexture('#34343a'),
       normalMap: (() => { const t = noiseNormalTexture(18, 0.9); t.repeat.set(2, 2); return t; })(),
-      normalScale: new THREE.Vector2(0.35, 0.35),
-      // Um pouco de brilho é o que faz a cobertura receber o degradê do
-      // céu em vez de morrer em preto: manta escura lisa reflete, e é
-      // esse reflexo que dá volume à laje vista de cima.
-      roughness: 0.52, metalness: 0.12 }),
+      normalScale: new THREE.Vector2(0.22, 0.22),
+      // Fosca de verdade. O degradê do céu ainda chega — por isso a
+      // `envMapIntensity` não é zero — mas como iluminação difusa, e não
+      // como imagem refletida.
+      roughness: 0.86, metalness: 0, envMapIntensity: 0.35 }),
     cumaru:       new THREE.MeshStandardMaterial({
       map: woodGrainTexture('#76583e', '#3f2c1a', 1, 1, { highRes: true, planks: 5 }),
       roughnessMap: woodRoughnessMap(1, 1, true), roughness: 0.62, metalness: 0.02 }),
@@ -3161,18 +3193,36 @@ function buildMaterials() {
   // precisa ser irregular, com fiadas de alturas diferentes e juntas
   // verticais desencontradas.
   {
-    const h = heightField(pbrSize, { octaves: 4, baseFreq: 6, persistence: 0.5, seed: 53 });
+    // AJUSTADO com a captura ampliada de `qa-exterior-dia`: a parede lia
+    // como BLOCO DE CONCRETO, não como pedra assentada. Duas causas, e
+    // nenhuma delas era falta de variação de tom — a sonda de pixels
+    // mediu desvio 18,3 na região, ou seja, a variação existe e chega.
+    //
+    //  1. A JUNTA NÃO ERA SOMBRA, era um fio claro. Com `jointWidth`
+    //     0,005 num mapa de 512 px cobrindo 1,6 m, a junta tem 9 mm.
+    //     Nesta distância a parede ocupa ~114 px/m, então a junta cai em
+    //     UM pixel de tela: o mipmap a dissolve, e o que sobra é o lábio
+    //     claro do normal map, não o vinco. Junta de pedra tem que ser
+    //     escura mesmo quando tem 1 px — quem faz isso é o ALBEDO, não o
+    //     relevo. Daí junta mais larga (1,8 cm, ainda realista para
+    //     assentamento a seco) e `albedoCavity` mais forte.
+    //  2. A FACE DA PEÇA ERA LISA. `baseFreq: 6` sobre 1,6 m dá feições
+    //     de 27 cm — grosso demais para ser grão, fino demais para ser
+    //     veio. Caía na faixa em que não se lê nada, e cada peça saía um
+    //     degradê limpo. `baseFreq: 12` põe a feição em ~13 cm e a quinta
+    //     oitava traz o grão fino de volta.
+    const h = heightField(pbrSize, { octaves: 5, baseFreq: 12, persistence: 0.5, seed: 53 });
     for (let i = 0; i < h.length; i++) h[i] = 0.45 + h[i] * 0.55;   // face do bloco
-    const tomBloco = carveCourses(h, pbrSize, { courses: 3, depth: 0.5, jointWidth: 0.005, seed: 11 });
+    const tomBloco = carveCourses(h, pbrSize, { courses: 3, depth: 0.70, jointWidth: 0.011, seed: 11 });
     const maps = pbrFromHeight(pbrSize, h, (alt, cav, x, y, size) => {
       // dois níveis de variação: o tom da PEÇA e o grão DENTRO da peça
       const peca = tomBloco[y * size + x];
-      const base = 104 + peca * 46;          // peça a peça
+      const base = 96 + peca * 62;           // peça a peça
       const grao = alt * 26;                 // grão interno
       const v = base + grao;
       return [_clamp255(v * 1.03), _clamp255(v * 0.98), _clamp255(v * 0.88)];
-    }, { normalStrength: 3.0, cavityRadius: 3, cavityGain: 14, roughBase: 0.9, roughVar: 0.1,
-         aoStrength: 1.0, albedoCavity: 0.5 });
+    }, { normalStrength: 3.0, cavityRadius: 4, cavityGain: 16, roughBase: 0.9, roughVar: 0.1,
+         aoStrength: 1.0, albedoCavity: 0.60 });
     applyPBR(M.stoneCore, maps, 1.0);
   }
 
@@ -3279,7 +3329,13 @@ function buildMaterials() {
    M.stoneCore.map, M.stoneCore.normalMap, M.stoneCore.roughnessMap, M.stoneCore.aoMap,
    M.madeiraClara.map, M.madeiraClara.normalMap, M.madeiraClara.roughnessMap, M.madeiraClara.aoMap,
    M.cumaru.map, M.cumaru.normalMap, M.cumaru.roughnessMap, M.cumaru.aoMap,
-   M.ipe.map, M.ipe.normalMap, M.ipe.roughnessMap, M.ipe.aoMap]
+   M.ipe.map, M.ipe.normalMap, M.ipe.roughnessMap, M.ipe.aoMap,
+   // A cobertura é quase sempre vista em ângulo rasante (a câmera fica
+   // abaixo dela em toda vista de fachada). Sem anisotropia a manta vira
+   // uma faixa cinza borrada exatamente onde ela tem mais área na tela —
+   // era o caso: nenhum dos dois mapas estava nesta lista.
+   M.manta.map, M.manta.normalMap,
+   M.grafite.map, M.grafite.normalMap]
     .forEach(t => { if (t) t.anisotropy = aniso; });
 
   glassMaterial = M.vidro;
@@ -3770,7 +3826,7 @@ function buildArchitecture() {
   // leitura de "terraço inacabado" nas vistas aéreas. Telhado plano de
   // casa contemporânea é impermeabilizado, não deck. O deck de madeira
   // volta só onde existe terraço de verdade (abaixo).
-  const roofSlabMats = [M.concreto, M.concreto, M.grafite, M.forroMadeira, M.concreto, M.concreto];
+  const roofSlabMats = [M.concreto, M.concreto, M.manta, M.forroMadeira, M.concreto, M.concreto];
   const roofSlab = new THREE.Mesh(roofSlabGeo, roofSlabMats);
   roofSlab.position.set(0.4, 3.35, 0);
   roofSlab.castShadow = true; roofSlab.receiveShadow = true;
@@ -5209,13 +5265,34 @@ function emitTree(cardOut, trunkOut, x, z, opts) {
     sx: trunkR, sy: trunkH, sz: trunkR,
   });
 
-  // galhos saindo do terço superior do tronco
+  // ------------------------------------------------------------
+  // ACHADO NA CAPTURA `qa-exterior-dia`, ampliando o canto inferior
+  // direito: os galhos da árvore de primeiro plano apareciam como VARAS
+  // DE MADEIRA soltas, atravessando a fachada, com a ponta cortada em
+  // disco e sem uma folha em volta.
+  //
+  // Não era o material nem a geometria do galho (o tronco já é cônico,
+  // sharedCyl(0.55, 1, ...)). Era o ENVELOPE. Fazendo a conta:
+  //
+  //   copa: casca dos cartões entre 0,78 e 1,00 de canopyR
+  //   galho: alcance horizontal = sin(tilt) * len
+  //          com len até 1,45*canopyR e sin(tilt) até 0,84
+  //          -> até 1,22*canopyR   (FORA da copa)
+  //   galho: base em 0,62*trunkH, e a copa começa em trunkH - 0,26*canopyR
+  //          -> começa bem ABAIXO da folhagem
+  //
+  // Ou seja: o galho nascia abaixo da copa e terminava fora dela. A ponta
+  // ficava contra o céu, e ponta de cone truncado contra o céu lê como
+  // cano serrado. Encurtando e subindo a origem, a ponta termina DENTRO
+  // da casca de folhas — que é onde galho de árvore de verdade termina.
   const nBranch = o.branches === undefined ? (2 + Math.floor(Math.random() * 3)) : o.branches;
   for (let b = 0; b < nBranch; b++) {
     const az = (b / nBranch) * Math.PI * 2 + Math.random() * 0.9;
     const tilt = 0.55 + Math.random() * 0.45;             // do vertical
-    const len = canopyR * (0.85 + Math.random() * 0.6);
-    const baseY = trunkH * (0.62 + Math.random() * 0.28);
+    // alcance horizontal máximo: 0,84 * 0,90 = 0,76 de canopyR — dentro
+    // da casca, que começa em 0,78
+    const len = canopyR * (0.55 + Math.random() * 0.35);
+    const baseY = trunkH * (0.84 + Math.random() * 0.10);
     const hx = Math.sin(tilt) * Math.cos(az) * len * 0.5;
     const hz = Math.sin(tilt) * Math.sin(az) * len * 0.5;
     const hy = Math.cos(tilt) * len * 0.5;
@@ -5869,14 +5946,56 @@ function buildDistantLandscape() {
   });
   const unitCard = new THREE.PlaneGeometry(1, 1);
   const far = [];
-  const rings = Quality.level === 'low' ? 3 : 4;
+  // ------------------------------------------------------------
+  // MEDIDO na captura `qa-exterior-dia`, com a sonda de pixels:
+  //
+  //   colina distante (225-435 m):  desvio de luminância  5,2
+  //   faixa de mata   (46-158 m):   desvio de luminância 33,0
+  //
+  // Seis vezes mais contraste local NA FRENTE de um fundo já quase
+  // totalmente apagado. Perspectiva aérea de verdade é monotônica: o
+  // contraste cai com a distância e não volta. Aqui ele dava um degrau.
+  //
+  // A causa não é a névoa — ela está certa. É que a massa arbórea
+  // TERMINAVA em 158 m. Com FogExp2(0,0033):
+  //
+  //   158 m -> 24% de névoa      (última árvore, ainda nítida)
+  //   225 m -> 62% de névoa      (primeiro relevo, já fantasma)
+  //
+  // Entre um e outro há 67 m de nada, e é justamente onde a curva de
+  // névoa é mais íngreme. O olho lê isso como um decalque de árvores
+  // colado sobre uma pintura de fundo.
+  //
+  // A correção é preencher a faixa, não mexer na névoa: anéis adicionais
+  // até ~270 m, onde a névoa já chega a 63% e encontra o relevo no mesmo
+  // valor. Como só as árvores GRANDES ainda se distinguem a essa
+  // distância, a escala cresce com o anel — o que também é mais barato,
+  // porque entrega a mesma silhueta com menos cartões.
+  //
+  // CUSTO, antes de aceitar: os dois anéis novos somam ~1.350 cartões
+  // contra os ~1.380 que já existiam — quase o dobro de instâncias. Mas
+  // custo de preenchimento cai com o quadrado da distância, e a conta
+  // fecha assim: uma árvore do anel 4-5 fica a ~190 m com porte 1,8;
+  // uma do anel 0 fica a ~60 m com porte 1,0. Tamanho angular
+  // (1,8/190) / (1,0/60) = 0,57, logo ÁREA 0,32. O acréscimo real de
+  // preenchimento é ~1/3 do que o anel existente já custa, não o dobro.
+  // Ainda assim fica fora de `low` e `medium`: lá o anel de mata já é o
+  // maior custo de preenchimento da cena, e o ganho é de composição, não
+  // de legibilidade.
+  const rings = Quality.level === 'low' ? 3
+              : (Quality.level === 'ultra' || Quality.level === 'high') ? 6 : 4;
   for (let ring = 0; ring < rings; ring++) {
     const rBase = 46 + ring * 30;
+    // Densidade angular constante: a circunferência cresce com o raio,
+    // então a contagem precisa crescer junto ou a mata rareia ao longe.
     const count = 90 + ring * 55;
     for (let i = 0; i < count; i++) {
       const a = (i / count) * Math.PI * 2 + Math.random() * 0.5;
       const r = rBase + Math.random() * 22;
-      const sc = 3.0 + Math.random() * 3.4;
+      // +18% de porte por anel: a 270 m uma árvore de 6 m ocupa 17 px e
+      // vira granulado; uma de 12 m ocupa 34 px e ainda lê como copa.
+      const porte = 1 + ring * 0.18;
+      const sc = (3.0 + Math.random() * 3.4) * porte;
       const x = Math.cos(a) * r, z = Math.sin(a) * r;
       const gy = farGroundHeight(x, z);   // apoia no relevo, não no plano
       // dois cartões cruzados: a árvore não some quando vista de canto
