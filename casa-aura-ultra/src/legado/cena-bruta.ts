@@ -149,6 +149,12 @@ let scene, camera, renderer, controls, clock;
 let houseGroup;
 let upperMass = null;
 let revealActive = false, revealAmount = 0, revealTarget = 0, revealCamMove = false;
+// Voo de capítulo disparado FORA do modo cinemático — quando o cliente
+// clica um ponto da barra de capítulos enquanto orbita à vontade. Precisa
+// de flag própria pelo mesmo motivo que `revealCamMove` tem a dele: o
+// `animate()` só chama `lerpCam()` em cinematic/presenting, e o
+// `clampFreeCamera()` só isenta quem se declara. Ver `goToChapter`.
+let chapterCamMove = false;
 let sunLight, ambientLight, hemiLight, poolLight;
 let lampLights = [];
 let envRT = null;
@@ -3198,31 +3204,54 @@ function buildMaterials() {
     // nenhuma delas era falta de variação de tom — a sonda de pixels
     // mediu desvio 18,3 na região, ou seja, a variação existe e chega.
     //
-    //  1. A JUNTA NÃO ERA SOMBRA, era um fio claro. Com `jointWidth`
-    //     0,005 num mapa de 512 px cobrindo 1,6 m, a junta tem 9 mm.
-    //     Nesta distância a parede ocupa ~114 px/m, então a junta cai em
-    //     UM pixel de tela: o mipmap a dissolve, e o que sobra é o lábio
-    //     claro do normal map, não o vinco. Junta de pedra tem que ser
-    //     escura mesmo quando tem 1 px — quem faz isso é o ALBEDO, não o
-    //     relevo. Daí junta mais larga (1,8 cm, ainda realista para
-    //     assentamento a seco) e `albedoCavity` mais forte.
-    //  2. A FACE DA PEÇA ERA LISA. `baseFreq: 6` sobre 1,6 m dá feições
+    //  1. A FACE DA PEÇA ERA LISA. `baseFreq: 6` sobre 1,6 m dá feições
     //     de 27 cm — grosso demais para ser grão, fino demais para ser
     //     veio. Caía na faixa em que não se lê nada, e cada peça saía um
     //     degradê limpo. `baseFreq: 12` põe a feição em ~13 cm e a quinta
-    //     oitava traz o grão fino de volta.
+    //     oitava traz o grão fino de volta. Esta parte funcionou.
+    //  2. A PAREDE LÊ COMO BLOCO DE CONCRETO — ACHADO, NÃO RESOLVIDO.
+    //
+    //     Tentei duas vezes e ERREI as duas, cada uma de um jeito. Fica
+    //     registrado porque a próxima pessoa vai ter as mesmas ideias:
+    //
+    //     Tentativa 1 — "a junta está fraca demais". É verdade que com
+    //     9 mm num mapa de 512 px cobrindo 1,6 m ela cai em ~1 px de tela
+    //     e o mipmap a dissolve. Alarguei para 1,8 cm e escureci no
+    //     albedo. Resultado: a leitura de bloco ficou MAIS categórica.
+    //     Junta forte + peça média + amarração corrida é a definição
+    //     visual de alvenaria; eu tinha reforçado justamente o sinal
+    //     errado.
+    //
+    //     Tentativa 2 — "então são as peças: menos fiadas, painel
+    //     grande, junta fina, e mais variação de tom peça a peça".
+    //     Resultado: TABULEIRO DE XADREZ. Com 2 fiadas e 1-2 peças por
+    //     ladrilho, o tom por peça vira poucas células grandes, e o
+    //     ladrilho se repete ~4,4 vezes na parede: a variação maior não
+    //     virou riqueza, virou padrão regular de dois tons.
+    //
+    //     O que sobra e É melhoria real está mantido: `baseFreq` de 6
+    //     para 12 e uma quinta oitava. Antes as feições tinham 27 cm —
+    //     grosso demais para grão, fino demais para veio — e a face da
+    //     peça saía um degradê limpo, sem superfície nenhuma. Isso
+    //     apareceu bem nas duas capturas e não tem efeito colateral.
+    //
+    //     Todo o resto volta ao valor anterior. Ficar iterando no escuro
+    //     aqui custa ~10 min por rodada (esta máquina renderiza a 0,1
+    //     quadro por segundo) e já produziu duas regressões. O caminho
+    //     certo é inspecionar o ALBEDO GERADO direto, sem passar pela
+    //     cena, e só então mexer.
     const h = heightField(pbrSize, { octaves: 5, baseFreq: 12, persistence: 0.5, seed: 53 });
     for (let i = 0; i < h.length; i++) h[i] = 0.45 + h[i] * 0.55;   // face do bloco
-    const tomBloco = carveCourses(h, pbrSize, { courses: 3, depth: 0.70, jointWidth: 0.011, seed: 11 });
+    const tomBloco = carveCourses(h, pbrSize, { courses: 3, depth: 0.5, jointWidth: 0.005, seed: 11 });
     const maps = pbrFromHeight(pbrSize, h, (alt, cav, x, y, size) => {
       // dois níveis de variação: o tom da PEÇA e o grão DENTRO da peça
       const peca = tomBloco[y * size + x];
-      const base = 96 + peca * 62;           // peça a peça
+      const base = 104 + peca * 46;          // peça a peça
       const grao = alt * 26;                 // grão interno
       const v = base + grao;
       return [_clamp255(v * 1.03), _clamp255(v * 0.98), _clamp255(v * 0.88)];
-    }, { normalStrength: 3.0, cavityRadius: 4, cavityGain: 16, roughBase: 0.9, roughVar: 0.1,
-         aoStrength: 1.0, albedoCavity: 0.60 });
+    }, { normalStrength: 3.0, cavityRadius: 3, cavityGain: 14, roughBase: 0.9, roughVar: 0.1,
+         aoStrength: 1.0, albedoCavity: 0.5 });
     applyPBR(M.stoneCore, maps, 1.0);
   }
 
@@ -6623,6 +6652,35 @@ function goToChapter(idx, showUI) {
   const startPos = camera.position.clone();
   const endPos = targetCamPos.clone();
 
+  // ------------------------------------------------------------
+  // BUG ENCONTRADO SONDANDO, e ele quebrava a navegação principal.
+  //
+  // Medido chamando goToChapter(4) ("Sala de Estar") com a experiência em
+  // `ready`, que é o estado de quem está orbitando à vontade:
+  //
+  //   t~4s   câmera (17 / 8,5 / 15)      — 29,0 m do alvo
+  //   t~10s  câmera (-8,6 / 1,6 / 3,2)   —  0,0 m   <- chegou
+  //   t~20s  câmera (17 / 8,5 / 15)      — 29,0 m   <- EXPULSA
+  //
+  // O corte põe a câmera dentro da sala, e no quadro seguinte
+  // `clampFreeCamera()` vê "está dentro do envelope agora, estava fora
+  // antes" e devolve `_camPrev`. O cliente clica "Sala de Estar", vê um
+  // fade, um piscar do interior, e volta para a vista aérea.
+  //
+  // A proteção está CERTA no que ela existe para fazer: impedir que o
+  // dedo arraste a câmera através da fachada. Ela só não sabe distinguir
+  // isso de um salto deliberado. Duas correções, uma para cada caminho:
+  //
+  //  - CORTE: a posição nova é válida por definição, então ela vira o
+  //    `_camPrev`. Sem isso o teste "veio de fora" dispara para sempre.
+  //  - VOO: `lerpCam()` só é chamado em cinematic/presenting/reveal, ou
+  //    seja, um capítulo com trajetória livre clicado em `ready` não
+  //    movia a câmera NENHUM metro. Ganha a mesma flag que o reveal já
+  //    tinha, e devolve o controle ao chegar.
+  //
+  // A apresentação guiada nunca sofreu disso porque roda em `presenting`,
+  // que a guarda isenta — por isso o defeito sobreviveu à verificação do
+  // Modo Apresentação.
   if (transitionNeedsCut(startPos, endPos)) {
     // CORTE: a trajetória cruzaria o edifício. Reposiciona atrás do fade.
     camCurve = null;
@@ -6630,8 +6688,10 @@ function goToChapter(idx, showUI) {
       camera.position.copy(endPos);
       controls.target.copy(targetLookAt);
       camera.lookAt(targetLookAt);
+      _camPrev.copy(endPos);
     });
   } else {
+    chapterCamMove = true;
     // VOO: caminho livre. O ponto médio sobe acima da cobertura para dar
     // um arco cinematográfico — e nunca rasante ao telhado.
     const midPos = startPos.clone().lerp(endPos, 0.5);
@@ -6981,11 +7041,12 @@ function animate() {
 
   if (Experience.is('cinematic') || Experience.is('presenting')) {
     lerpCam(dt);
-  } else if (revealCamMove) {
+  } else if (revealCamMove || chapterCamMove) {
     lerpCam(dt);
     // termina o voo quando chega perto e devolve o controle ao usuário
     if (camera.position.distanceTo(targetCamPos) < 0.35) {
       revealCamMove = false;
+      chapterCamMove = false;
       controls.target.copy(targetLookAt);
       controls.enabled = true;
     }
@@ -7201,7 +7262,8 @@ function animate() {
 // no modo manual.
 const _camPrev = new THREE.Vector3();
 function clampFreeCamera() {
-  if (Experience.is('cinematic') || Experience.is('presenting') || revealCamMove) {
+  if (Experience.is('cinematic') || Experience.is('presenting')
+      || revealCamMove || chapterCamMove) {
     _camPrev.copy(camera.position);
     return;
   }

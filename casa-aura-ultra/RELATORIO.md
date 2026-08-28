@@ -223,7 +223,7 @@ A última linha continua alta **de propósito**: galho de árvore sai do
 tronco abaixo da massa de folhas mesmo. O defeito era a PONTA no céu, e
 essa saiu de 38% para praticamente zero.
 
-### 4. O núcleo em pedra lia como bloco de concreto — ALTERADO, CONFIRMAÇÃO VISUAL PENDENTE
+### 4. O núcleo em pedra lê como bloco de concreto — ACHADO, NÃO RESOLVIDO
 
 O elemento herói do projeto aparecia como muro de blocos: retângulos
 creme lisos com junta de fio claro.
@@ -239,12 +239,106 @@ região, e o gerador já sorteia tom peça a peça. Eram outras duas coisas:
 - `baseFreq: 6` sobre 1,6 m dá feições de 27 cm: grosso demais para grão,
   fino demais para veio. Cada peça saía um degradê limpo, sem superfície.
 
-A junta passou de 9 mm para 1,9 cm (de ~1,1 para ~2,1 px de tela nesta
-distância) e `albedoCavity` de 0,50 para 0,60, para ela ser escura no
-albedo e não depender do relevo. `baseFreq` foi de 6 para 12 e ganhou uma
-quinta oitava. **Diferente dos outros três itens, este ainda não tem
-confirmação por imagem** — a varredura que a produz não terminou até o
-fechamento deste texto.
+**Tentei corrigir duas vezes e errei as duas.** Fica registrado inteiro,
+porque a próxima pessoa vai ter exatamente as mesmas ideias:
+
+| tentativa | hipótese | resultado medido na imagem |
+|---|---|---|
+| 1 | junta fraca demais → alargar para 1,9 cm e escurecer no albedo | leitura de bloco ficou **mais** categórica |
+| 2 | peça pequena demais → 2 fiadas, painel grande, junta fina, mais variação de tom | **tabuleiro de xadrez** de dois tons |
+
+O erro da primeira foi reforçar o sinal errado: junta visível somada a
+peça média em amarração corrida é a *definição* visual de alvenaria. O
+erro da segunda foi de amostragem: com 2 fiadas e 1–2 peças por ladrilho,
+o tom por peça vira poucas células grandes, e o ladrilho se repete ~4,4
+vezes na parede — variação maior não virou riqueza, virou padrão.
+
+**Revertido para os valores anteriores**, exceto a única mudança que se
+mostrou boa nas duas capturas e não tem efeito colateral: `baseFreq` de 6
+para 12 mais uma quinta oitava, que dá superfície à face da peça.
+
+Não fica no ar como "quase pronto": **este item está em ACHADO, NÃO
+RESOLVIDO.** O caminho certo é inspecionar o albedo gerado direto, sem
+passar pela cena — iterar às cegas custa ~10 min por rodada nesta máquina
+e já produziu duas regressões.
+
+### 5. A barra de capítulos não levava a lugar nenhum — CORRIGIDO E MEDIDO
+
+O achado mais grave desta rodada, e ele não estava na imagem: estava no
+comportamento. Sondando `goToChapter(4)` ("Sala de Estar") com a
+experiência em `ready` — o estado de quem está orbitando à vontade, que é
+como o cliente usa a barra de capítulos:
+
+| tempo | estado | câmera | distância do alvo |
+|---|---|---|---|
+| ~4 s | ready | (17 / 8,5 / 15) | 29,0 m |
+| ~10 s | ready | **(−8,6 / 1,6 / 3,2)** | **0,0 m** ← chegou |
+| ~20 s | ready | (17 / 8,5 / 15) | 29,0 m ← **expulsa** |
+| ~40 s | ready | (17 / 8,5 / 15) | 29,0 m |
+
+O corte põe a câmera dentro da sala e, no quadro seguinte,
+`clampFreeCamera()` vê "está dentro do envelope agora, estava fora antes"
+e devolve a posição anterior. O cliente clica "Sala de Estar", vê um fade,
+um piscar do interior, e volta para a vista aérea.
+
+E havia um segundo caminho quebrado no mesmo lugar: capítulos cuja
+trajetória **não** cruza o edifício usam voo por curva, e o voo depende de
+`lerpCam()`, que o `animate()` só chama em `cinematic`/`presenting`/
+`reveal`. Clicado em `ready`, esse capítulo não movia a câmera nenhum
+metro.
+
+Ou seja: pela barra de capítulos, em uso livre, **os capítulos internos
+piscavam e voltavam e os externos não saíam do lugar**. Os três capítulos
+de interior (Sala de Estar, Cozinha & Jantar, Suíte Master) são o miolo do
+tour.
+
+Por que sobreviveu a toda a verificação anterior: o Modo Apresentação roda
+em `presenting`, estado que a guarda isenta e em que `lerpCam()` roda. A
+apresentação guiada sempre funcionou — o que não funcionava era a
+navegação manual.
+
+A guarda está **certa** no que ela existe para fazer (impedir que o dedo
+arraste a câmera através da fachada). Ela só não distinguia isso de um
+salto deliberado. Corrigido nos dois caminhos: no corte, a posição nova
+passa a ser o `_camPrev` (é válida por definição); no voo, uma flag
+`chapterCamMove` espelhando o que o reveal já fazia, que faz o `lerpCam()`
+rodar e isenta a guarda até a chegada.
+
+### 6. A poeira lia como NEVE dentro da sala — CORRIGIDO
+
+Achado imediatamente depois do conserto acima, porque **só então o
+capítulo interno virou alcançável**. A primeira captura da "Sala de
+Estar" tinha dezenas de discos brancos moles espalhados pelo quadro
+inteiro, alguns com ~40 px. Era também a origem das "manchas brancas no
+vidro" que eu tinha visto de fora e não sabia explicar.
+
+A conta, que é a prova:
+
+    antes:  gl_PointSize = 1,7 * 30 / d
+            -> 51 px a 1 m,  25 px a 2 m,  sem teto
+    alpha = smoothstep(60, 6, d)
+            -> opacidade MÁXIMA na partícula mais próxima
+
+Grão de poeira real tem ~50 µm. A 1 m, com 38° de campo em 800 px, um
+pixel vale ~0,86 mm — o disco estava quatro ordens de grandeza acima do
+físico. E grande somado a opaco perto é literalmente a receita de neve.
+
+    depois: gl_PointSize = clamp(0,9 * 30 / d, 1, 6)   // teto de 6 px
+    alpha = smoothstep(60, 6, d) * smoothstep(0,35, 1,6, d)
+            // some também MUITO PERTO: a 40 cm da lente a partícula
+            // estaria fora de foco e sem contraste
+    opacidade por partícula: 0,5 -> 0,22 (o blending é aditivo e
+            acumulava para branco sólido nos aglomerados)
+
+**Sobre a medição:** tentei três métricas escalares e nenhuma separa o
+efeito, então não invento uma. Janela fixa na parede erra o alvo (a
+poeira é esparsa e de posição aleatória — duas janelas caíram em trechos
+sem partícula nenhuma nos dois quadros, e uma terceira incluía o abajur,
+que fixava o máximo em 255 nos dois). Diferença contra uma cópia borrada
+detecta a poeira, mas detecta junto toda a aresta de móvel: dá 6,2% antes
+e 5,9% depois, ou seja, mede a mobília. A prova aqui é a aritmética acima
+mais as duas capturas; o teto de 6 px é exato e não depende de
+interpretação.
 
 ### Encontrado, reproduzido e NÃO corrigido
 
@@ -255,10 +349,16 @@ fechamento deste texto.
   16. **UNMEASURED — REQUIRES TARGET HARDWARE**: a filtragem de textura do
   SwiftShader não representa a de uma GPU real, então subir a anisotropia
   aqui não provaria nada. Precisa de uma passada em GPU antes de mexer.
-- **Manchas brancas no vidro.** Elipses suaves sobre o guarda-corpo e o
-  pano de vidro, com cara de mancha e não de brilho. Origem não
-  determinada (candidatos: especular de `PointLight` espalhada pelo bloom,
-  ou as `RectAreaLight` das janelas). Não mexido sem saber a causa.
+- **Erro meu de leitura, registrado para não voltar:** capturei a piscina
+  em `applySolarTime(0.72)` chamando o resultado de "golden hour", e saiu
+  quase noite. Não é defeito do produto —
+  `SOLAR_T = { day: 0, golden: 0.52, blue: 0.76, night: 1.00 }`. O 0,72
+  está a um passo da *blue hour*, e a sonda confirma: a 0,72 o sol está em
+  0,654 contra 4,637 ao meio-dia (14%), e a névoa já é `#586380`. A
+  progressão de névoa medida é coerente e bem calibrada:
+  `#dfe2e3` (dia) → `#586380` (crepúsculo) → `#1b2740` (noite), com a
+  densidade quase constante em ~0,0034. Para julgar a golden hour de
+  verdade é preciso `setLightMode('golden')` ou `applySolarTime(0.52)`.
 - **A cena não é determinística.** A vegetação usa `Math.random()` sem
   semente, então cada carregamento gera uma floresta diferente. Isso torna
   A/B de qualquer coisa perto de vegetação pouco confiável — as medições

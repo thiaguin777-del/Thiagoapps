@@ -59,9 +59,15 @@ export function criarPoeira(
   const mat = new THREE.ShaderMaterial({
     uniforms: {
       casaAura_tempo: { value: 0 },
-      casaAura_tamanho: { value: 1.7 },
+      // 1,7 dava 51 px de disco a 1 m da câmera — a poeira lia como neve
+      // dentro da sala. Ver a conta inteira em `poeira.vert`, que também
+      // ganhou um teto de 6 px e um fade de perto. Com o teto fazendo o
+      // trabalho pesado, este valor governa só a faixa média.
+      casaAura_tamanho: { value: 0.9 },
       casaAura_cor: { value: new THREE.Color(0xfff2dc) },
-      casaAura_opacidade: { value: 0.5 },
+      // Blending aditivo já acumula onde as partículas se sobrepõem;
+      // 0,5 por partícula estourava para branco sólido nos aglomerados.
+      casaAura_opacidade: { value: 0.22 },
     },
     vertexShader: POEIRA_VERT,
     fragmentShader: POEIRA_FRAG,
