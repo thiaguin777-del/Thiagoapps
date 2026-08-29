@@ -430,6 +430,24 @@ function createAssetSystem() {
     // Agora uma sonda só decide: se o primeiro arquivo não está lá, a
     // pasta não está lá, e as outras 33 requisições não acontecem.
     // ------------------------------------------------------------
+    // ...e nem a sonda, quando ela não pode dar certo.
+    //
+    // Em `file://` o navegador trata a origem como opaca e BLOQUEIA por
+    // CORS a leitura de qualquer imagem vizinha — exista ela ou não. A
+    // sonda então nunca informa nada, e o preço é um erro vermelho de
+    // CORS no console a cada abertura. Isso importa porque a entrega em
+    // arquivo único (`npm run build:unico`) é feita exatamente para ser
+    // aberta com duplo clique: um erro logo na abertura de um arquivo
+    // que na verdade está perfeito é o pior tipo de ruído — o que faz
+    // duvidar de coisa que está certa.
+    //
+    // As texturas externas são opcionais por projeto e o caminho
+    // procedural cobre tudo, então pular a sonda aqui não perde nada.
+    if (location.protocol === 'file:') {
+      A.available = (A.loaded.textures + A.loaded.models) > 0;
+      return A;
+    }
+
     const sonda = await tryTexture('concrete_diff.jpg', true, null);
     if (!sonda) {
       A.available = (A.loaded.textures + A.loaded.models) > 0;
