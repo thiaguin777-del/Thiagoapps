@@ -1624,7 +1624,62 @@ function updateGradeForSolarTime(t) {
     gradePass.uniforms.lift.value      = 0.010 + t * 0.030;
   }
   if (grainPass) grainPass.uniforms.amount.value = 0.014 + t * 0.024;
-  if (bloomPass) bloomPass.strength = 0.20 + t * 0.55;
+  // Guardado, não aplicado: quem aplica é `atualizarBloomPorLocal()`, a
+  // cada quadro, porque o valor final depende também de ONDE a câmera
+  // está — e ela se move sem que a hora solar mude.
+  if (bloomPass) bloomPass.__baseSolar = 0.20 + t * 0.55;
+}
+
+// ============================================================
+// BLOOM: a mesma rampa serve fora e afoga dentro
+// ------------------------------------------------------------
+// ACHADO medindo o capítulo "Sala de Estar" à noite: 41,3% dos pixels da
+// parede acima de 240, e o piso a 111 — ou seja, estouro só nas
+// superfícies claras, não na sala inteira.
+//
+// A ablação (um boot, quatro estados) isolou a causa:
+//
+//   controle                     41,4% da parede estourada, piso 111,1
+//   SEM BLOOM                    12,7%                      piso 106,2
+//   lâmpadas a 50%               27,3%                      piso 110,0
+//   sem bloom e sem lâmpadas      0,0%                      piso 105,6
+//
+// O bloom responde por ~70% dos pixels estourados e custa 5 níveis de
+// luz de piso. É a melhor troca disponível, de longe: comprimir o rebote
+// ambiente, que era minha primeira hipótese, custava 46 níveis de piso
+// para ganhar 15 pontos.
+//
+// E a rampa NÃO está errada — está errada só aqui dentro. Ela sobe de
+// 0,20 no dia para 0,75 à noite justamente para as luminárias
+// "respirarem", e é isso que faz a vista noturna EXTERNA funcionar: a
+// casa acesa vista do jardim é a imagem que vende. O problema é que um
+// passe de tela não sabe se a câmera está dentro ou fora — e dentro, o
+// mesmo halo que desenha a casa à distância lava um cômodo branco de
+// 3 m de pé-direito com nove luminárias.
+//
+// A cena já sabe responder isso: `pointInEnvelope`, a mesma função que
+// impede o cliente de atravessar a fachada. Dentro do envelope o bloom
+// cai para 45% (0,75 x 0,45 = 0,34, o valor que a varredura de força
+// apontou: 26,7% de estouro mantendo halo visível na luminária).
+//
+// A transição é suavizada porque atravessar o pano de vidro é justamente
+// o movimento mais comum da apresentação: um degrau de bloom no momento
+// de entrar na casa seria pior que o estouro.
+const BLOOM_DENTRO = 0.45;
+let _bloomFator = 1;
+
+function atualizarBloomPorLocal(dt) {
+  if (!bloomPass) return;
+  const alvo = pointInEnvelope(camera.position, -0.35) ? BLOOM_DENTRO : 1;
+  // POR TEMPO, nao por quadro. Escrevi `* 0.08` por quadro na primeira
+  // versao e a verificacao pegou: a 0,1 quadro por segundo o fator mal
+  // saiu de 1 em 26 s -- dentro deu 0,609 quando devia dar 0,34. E o
+  // MESMO defeito que `setLightMode` tinha (0,016 por quadro = 60 fps
+  // cravados) e que eu corrigi horas antes nesta mesma sessao. Constante
+  // de tempo de ~200 ms, igual em qualquer taxa de quadros.
+  _bloomFator += (alvo - _bloomFator) * Math.min(1, (dt || 0.016) * 5);
+  const base = bloomPass.__baseSolar === undefined ? 0.45 : bloomPass.__baseSolar;
+  bloomPass.strength = base * _bloomFator;
 }
 
 // ============================================================
@@ -2693,6 +2748,26 @@ const indoorU = {
   // recorta — e não a abóbada toda. 0,55 é esse limite geométrico, não um
   // número escolhido para a imagem ficar boa.
   winMax: { value: 0.55 },
+  // MEDIDO no capítulo "Sala de Estar" à noite, por região:
+  //
+  //   parede esquerda   média 229,6   41,3% dos pixels acima de 240
+  //   teto              média 225,1   36,8%
+  //   piso              média 111,1    0,0%
+  //   sofá              média 140,6    0,0%
+  //
+  // O estouro é EXCLUSIVO de parede e teto — o que descarta exposição
+  // global e tone mapping, e aponta para o albedo: o preenchimento entra
+  // no `iblIrradiance`, que multiplica o albedo, então estuque claro
+  // (~0,85) satura e piso escuro não.
+  //
+  // Cheguei a implementar aqui uma SATURAÇÃO em luminância para o rebote
+  // não cortar. A varredura reprovou: com o joelho em 1,0 o estouro caía
+  // só de 41% para 26% e o piso desabava de 111 para 65. Trocar 46 níveis
+  // de luz da sala por 15 pontos de estouro é péssimo negócio, e o
+  // mecanismo foi retirado em vez de ficar como peça morta.
+  //
+  // A ablação seguinte achou a causa de verdade: o BLOOM. Ver
+  // `setupPostProcessing`.
 };
 
 function applyIndoorOcclusion(material, prevHook) {
@@ -2766,8 +2841,6 @@ function applyIndoorOcclusion(material, prevHook) {
         // superfície não vê o nada, vê estuque claro e madeira quente.
         '  iblIrradiance = iblIrradiance * aura.x',
         '                + uIndoorBounce * (uIndoorFill * aura.y * (1.0 - aura.x));',
-        // Especular só atenua: rebote difuso de parede não gera reflexo
-        // nítido, e somá-lo aqui daria um brilho falso em piso e bancada.
         '  radiance *= aura.x;',
         '}',
       ].join('\n'));
@@ -7425,6 +7498,8 @@ function animate() {
   // Enquanto ele conduz, o orbit fica de fora do laco.
   if (!window.__auraCameraTravada) controls.update();
   clampFreeCamera();
+  // Depois do clamp: o bloom segue a posição FINAL da câmera do quadro.
+  atualizarBloomPorLocal(dt);
   if (grainPass) grainPass.uniforms.time.value = time;
   if (!Capability.reducedMotion) windUniform.value = time;
   // DEFENSIVO: não consegui validar o pós-processamento renderizando —
@@ -7571,3 +7646,11 @@ export function _cenaPronta() { return !!(scene && renderer); }
 // que a aplicação não importa.
 // ------------------------------------------------------------
 export { heightField, cavityField, carveCourses, pbrFromHeight, grassTexture };
+
+// As uniforms do rebote de interior, para calibração em tempo de
+// execução. São COMPARTILHADAS por todos os materiais (é o motivo de
+// `applyIndoorOcclusion` não pedir chave de programa própria), então um
+// único write move a casa inteira e uma varredura de calibração custa um
+// boot em vez de um por valor — que aqui, a 0,1 quadro por segundo,
+// é a diferença entre dez minutos e dez segundos.
+export { indoorU };
