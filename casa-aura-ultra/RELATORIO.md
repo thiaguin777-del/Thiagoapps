@@ -431,15 +431,109 @@ Vale registrar que este defeito **só apareceu porque o conserto anterior
 tornou a navegação por capítulos utilizável**. Os dois últimos achados
 desta rodada saíram um do outro.
 
-### Encontrado, reproduzido e NÃO corrigido
+### 8. A cena não era a mesma duas vezes — CORRIGIDO E MEDIDO
 
-- **Trama regular no gramado.** Volta a aparecer em ângulo rasante, apesar
-  do conserto anterior (`noiseNormalTexture(8)` → `(24, 1.15)`). A
-  hipótese é moiré por subamostragem: `map.repeat` 450 e `normalMap.repeat`
-  317 sobre o disco de 260 m, com anisotropia limitada a 8 de um máximo de
-  16. **UNMEASURED — REQUIRES TARGET HARDWARE**: a filtragem de textura do
-  SwiftShader não representa a de uma GPU real, então subir a anisotropia
-  aqui não provaria nada. Precisa de uma passada em GPU antes de mexer.
+A vegetação sorteava posição, porte e inclinação com `Math.random()` sem
+semente — 127 chamadas no arquivo. Duas consequências, em ordem de
+gravidade:
+
+1. **Este é um material de venda.** O corretor abre a casa numa reunião,
+   abre de novo na seguinte, e o jardim está diferente. Uma maquete que
+   muda sozinha não é uma maquete do imóvel.
+2. Nenhum A/B de imagem perto de vegetação era confiável: metade da
+   diferença entre dois quadros era o sorteio. Foi por isso que a medição
+   do telhado teve de usar razão de canal na mesma superfície.
+
+Trocar as 127 chamadas seria invasivo. Em vez disso `Math.random` é
+substituído por um xorshift semeado **durante cada etapa síncrona** de
+construção e devolvido num `finally`.
+
+Por etapa, e não uma vez para a cena inteira, por dois motivos:
+`buildScene` é `async` e cede um quadro entre etapas — com o patch
+atravessando o `await`, qualquer outro código que sorteie nesse intervalo
+(three, gsap, o laço de render) entraria no mesmo fluxo e o resultado
+deixaria de ser reproduzível; e cada etapa ganha um fluxo próprio
+derivado do nome dela, então mexer no paisagismo não desloca o sorteio da
+arquitetura. `?semente=N` troca o conjunto inteiro.
+
+Medido com duas cargas independentes, comparando uma impressão digital
+que inclui a soma ponderada das 16 componentes de **todas** as matrizes
+de instância:
+
+| | carga 1 | carga 2 |
+|---|---|---|
+| instâncias | 5002 | 5002 |
+| triângulos | 104 436 | 104 436 |
+| **soma das matrizes** | **171347,886** | **171347,886** |
+
+Não coberto: as partículas (poeira, fumaça, pássaros) nascem em
+`CasaAuraScene.ts`, fora das etapas de `buildScene`, e continuam
+sorteando. São efeitos em movimento, então não produzem a queixa "o
+jardim mudou" — fica registrado por honestidade.
+
+### 9. A trama do gramado não vinha do normal map — CORRIGIDO
+
+Eu tinha classificado este item como **NÃO MEDIDO — exige hardware alvo**,
+com o argumento de que a filtragem do SwiftShader não representa a de uma
+GPU e que portanto nada aqui provaria nada. **Esse argumento estava errado
+no essencial:** ele vale para anisotropia, mas o artefato *reproduz* nesta
+máquina, e boa parte das hipóteses é testável sem depender de filtragem.
+
+Primeiro, uma métrica. "Tem trama" é impressão; autocorrelação 2D é
+número. Subtrai-se a média local (para não medir o degradê de luz) e
+varre-se o plano de defasagem inteiro — em 2D, porque os losangos são
+**diagonais** e medir só em x e y os dilui.
+
+Depois, ablação em cena: `repeat` e `normalScale` são propriedades de
+textura, então dá para trocá-las **em tempo de execução** e recapturar.
+Cinco configurações num boot só, em vez de cinco boots:
+
+| configuração | pico 2D | defasagem |
+|---|---|---|
+| atual (map 450 / normal 317) | 0,2556 | (−9, 3) |
+| **normal map desligado** | **0,2590** | (−9, 3) |
+| map 150 | 0,2492 | **(14, 5)** |
+| normal 110 | 0,2816 | (−9, 3) |
+| ambos aliviados | 0,2284 | **(14, 5)** |
+
+Desligar o normal map **não muda nada** — e era a ele que o comentário do
+código atribuía o artefato. Já mexer no `map` **migra a defasagem**: o
+período está preso ao ladrilho do mapa difuso. E como aliviar o `repeat`
+quase não reduz a intensidade, não é aliasing: é o ladrilho ser
+**reconhecível** e se repetir.
+
+**Uma ressalva honesta sobre a métrica.** Na bancada, a variante "sem
+manchas" pontua 0,2306 e visualmente não tem repetição nenhuma. Ou seja o
+piso da medida é ~0,23, e as magnitudes da tabela acima estão quase todas
+dentro dele. O que sustenta as conclusões é a **migração da defasagem**
+(um sinal qualitativo robusto) e a inspeção visual da bancada — não os
+valores. Não vou tratá-los como precisos.
+
+A causa, vista na bancada repetindo o ladrilho 4×4 na densidade que ele
+tem a ~40 m: as **26 manchas de raio 15%–45%** do ladrilho. Num ladrilho
+de 58 cm elas medem 9–26 cm — grandes o bastante para o olho reconhecer e
+reencontrar a cada 58 cm. Reduzidas a 6%–16% (3,5–9 cm) viram mosqueado
+em vez de assinatura.
+
+E a variação de tom que elas davam não se perde: já existe, no lugar
+certo. `applyMacroVariation(M.gramado, 11.0, 0.16)` faz isso **no shader,
+em 11 m, onde não se repete**. Ter as duas era redundante — e a redundante
+era justamente a que tilava.
+
+Verificado em cena, mesma câmera, mesma região, mesmo tamanho de janela
+(os dois valores são comparáveis entre si; o que não se deve tratar como
+preciso é a magnitude absoluta):
+
+| | pico 2D |
+|---|---|
+| manchas de 15%–45% | 0,2556 |
+| manchas de 6%–16% | **0,2080** |
+
+E, sobretudo, a treliça em losango **desapareceu da imagem** — que é o
+defeito que se estava perseguindo.
+
+### Erro meu de leitura, registrado para não voltar
+
 - **Erro meu de leitura, registrado para não voltar:** capturei a piscina
   em `applySolarTime(0.72)` chamando o resultado de "golden hour", e saiu
   quase noite. Não é defeito do produto —
@@ -450,13 +544,6 @@ desta rodada saíram um do outro.
   `#dfe2e3` (dia) → `#586380` (crepúsculo) → `#1b2740` (noite), com a
   densidade quase constante em ~0,0034. Para julgar a golden hour de
   verdade é preciso `setLightMode('golden')` ou `applySolarTime(0.52)`.
-- **A cena não é determinística.** A vegetação usa `Math.random()` sem
-  semente, então cada carregamento gera uma floresta diferente. Isso torna
-  A/B de qualquer coisa perto de vegetação pouco confiável — as medições
-  acima foram escolhidas para não depender disso (razão de canal na mesma
-  superfície, desvio dentro de uma faixa). Semear o gerador é a próxima
-  ação óbvia, e não foi feita nesta rodada para não trocar a aparência de
-  toda a vegetação junto com quatro outras mudanças.
 
 ### Verificado como CORRETO — não mexer
 
@@ -731,8 +818,8 @@ Classificação exigida: DONE / PARCIAL / BLOQUEADO / NÃO MEDIDO. Um item só
 | Transição de luz contando quadros | **DONE** | `0,016/quadro` → relógio real; a 30 fps durava o dobro do pedido |
 | Anti-aliasing, cáusticas, feixes, áudio, Modo Seção, fallback | **DONE** | seções anteriores deste relatório |
 | Núcleo em pedra lendo como bloco | **DONE** | ablação: a junta sozinha causava a leitura; 3 → 10 fiadas troca alvenaria por estratificação |
-| Trama regular no gramado | **NÃO MEDIDO** | filtragem do SwiftShader não representa GPU real |
-| Determinismo da cena | **ACHADO, NÃO RESOLVIDO** | vegetação usa `Math.random()` sem semente |
+| Trama regular no gramado | **DONE** | não era o normal map: eram as manchas do ladrilho difuso; 0,2556 → 0,2080 e a treliça sumiu |
+| Determinismo da cena | **DONE** | duas cargas com soma das 5002 matrizes de instância idêntica (171347,886) |
 | Rodapés além das duas paredes norte | **PARCIAL** | não sei onde estão as aberturas e não vou chutar |
 | Desempenho (FPS, tempo de quadro) | **NÃO MEDIDO** | esta máquina não tem GPU |
 | Galeria 360° | **BLOQUEADO** | não há panorama nenhum no repositório |

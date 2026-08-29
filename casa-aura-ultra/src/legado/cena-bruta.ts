@@ -2334,15 +2334,22 @@ function barkTexture(baseHex) {
 // suficiente para ter detalhe perto. O tiling que isso criaria é
 // quebrado depois por applyMacroVariation().
 // ============================================================
-function grassTexture(baseHex) {
+// `opts` existe para a bancada (`gramado-lab`) poder varrer a escala das
+// manchas sem duplicar a função. Os padrões são exatamente o que a cena
+// sempre usou, então chamar `grassTexture(cor)` continua idêntico.
+function grassTexture(baseHex, opts) {
+  opts = opts || {};
+  const nManchas = opts.manchas === undefined ? 26 : opts.manchas;
+  const rMin = opts.manchaMin === undefined ? 0.15 : opts.manchaMin;
+  const rVar = opts.manchaVar === undefined ? 0.30 : opts.manchaVar;
   const tex = makeCanvasTexture(256, (ctx, s) => {
     ctx.fillStyle = shadeHex(baseHex, 0.82);
     ctx.fillRect(0, 0, s, s);
     // manchas largas de tom antes das lâminas: gramado real tem áreas
     // mais secas e mais verdes, nunca cor única
-    for (let i = 0; i < 26; i++) {
+    for (let i = 0; i < nManchas; i++) {
       const cx = Math.random() * s, cy = Math.random() * s;
-      const r = s * (0.15 + Math.random() * 0.3);
+      const r = s * (rMin + Math.random() * rVar);
       // deslocamento pequeno entre os dois focos: dá à mancha um caimento
       // assimétrico, mais parecido com área seca de gramado que um disco
       const ox = (Math.random() - 0.5) * r * 0.5, oy = (Math.random() - 0.5) * r * 0.5;
@@ -2984,7 +2991,31 @@ function buildMaterials() {
       roughness: 1.0, metalness: 0 }),
     banheira:     new THREE.MeshStandardMaterial({ color: 0xf4f1ea, roughness: 0.25, metalness: 0 }),
     gramado:      new THREE.MeshStandardMaterial({
-      map: grassTexture('#6f8a4f'),
+      // A TRAMA DO GRAMADO vinha daqui, e não do normal map.
+      //
+      // Medido em cena, cinco configurações num boot só, por
+      // autocorrelação 2D de um trecho de gramado aberto:
+      //
+      //   desligar o normal map     -> pico 0,2590 contra 0,2556: NADA
+      //   map.repeat 450 -> 150     -> a defasagem migra de (-9,3)
+      //                                para (14,5)
+      //
+      // O período está preso ao ladrilho do mapa DIFUSO, e aliviar o
+      // repeat só o desloca. Ou seja não é aliasing: é o ladrilho ser
+      // RECONHECÍVEL. Na bancada (`dev/`), repetindo o ladrilho 4x4 na
+      // densidade que ele tem a ~40 m, a assinatura salta aos olhos — e
+      // some por completo com `manchas: 0`.
+      //
+      // As culpadas são as manchas de raio 15%-45% do ladrilho: com
+      // ladrilho de 58 cm elas medem 9-26 cm, grandes o bastante para o
+      // olho reconhecer e reencontrar a cada 58 cm. Reduzidas a 6%-16%
+      // (3,5-9 cm) viram mosqueado em vez de assinatura.
+      //
+      // A variação de tom que elas davam não se perde: ela já existe, e
+      // no lugar certo — `applyMacroVariation(M.gramado, 11.0, 0.16)`
+      // logo abaixo faz isso no shader, em 11 m, onde NÃO se repete.
+      // Ter as duas era redundante, e a redundante era a que tilava.
+      map: grassTexture('#6f8a4f', { manchaMin: 0.06, manchaVar: 0.10 }),
       // ACHADO RENDERIZANDO em ângulo rasante: o gramado inteiro era um
       // acolchoado de losangos, como manta tricotada.
       //
@@ -7404,4 +7435,4 @@ export function _cenaPronta() { return !!(scene && renderer); }
 // Nada aqui é chamado em produção; o bundler remove por tree-shaking o
 // que a aplicação não importa.
 // ------------------------------------------------------------
-export { heightField, cavityField, carveCourses, pbrFromHeight };
+export { heightField, cavityField, carveCourses, pbrFromHeight, grassTexture };
