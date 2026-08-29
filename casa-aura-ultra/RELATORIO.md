@@ -223,7 +223,7 @@ A última linha continua alta **de propósito**: galho de árvore sai do
 tronco abaixo da massa de folhas mesmo. O defeito era a PONTA no céu, e
 essa saiu de 38% para praticamente zero.
 
-### 4. O núcleo em pedra lê como bloco de concreto — ACHADO, NÃO RESOLVIDO
+### 4. O núcleo em pedra lia como bloco de concreto — RESOLVIDO POR ABLAÇÃO
 
 O elemento herói do projeto aparecia como muro de blocos: retângulos
 creme lisos com junta de fio claro.
@@ -253,14 +253,70 @@ erro da segunda foi de amostragem: com 2 fiadas e 1–2 peças por ladrilho,
 o tom por peça vira poucas células grandes, e o ladrilho se repete ~4,4
 vezes na parede — variação maior não virou riqueza, virou padrão.
 
-**Revertido para os valores anteriores**, exceto a única mudança que se
-mostrou boa nas duas capturas e não tem efeito colateral: `baseFreq` de 6
-para 12 mais uma quinta oitava, que dá superfície à face da peça.
+Revertidas as duas, e então **construí a ferramenta que eu mesmo tinha
+apontado como o caminho certo**: `src/legado/pedra-lab.ts` mais
+`dev/pedra-lab.html`. Ela gera o albedo pelas **mesmas funções da cena**
+(`heightField`, `carveCourses`, `pbrFromHeight`, importadas e não
+copiadas — bancada que reimplementa mede outra coisa) e desenha num
+canvas 2D. Sem WebGL, sem cena, sem iluminação: **4 segundos por rodada
+em vez de 10 minutos, e oito variantes no mesmo quadro.** Um ganho de
+~150× no laço de iteração, e foi isso que destravou o problema.
 
-Não fica no ar como "quase pronto": **este item está em ACHADO, NÃO
-RESOLVIDO.** O caminho certo é inspecionar o albedo gerado direto, sem
-passar pela cena — iterar às cegas custa ~10 min por rodada nesta máquina
-e já produziu duas regressões.
+A bancada também corrigiu um erro de **escala de julgamento** que eu vinha
+cometendo: na captura da fachada a parede ocupa ~230 px para 7,0 m, ou
+seja ~52 px por ladrilho de 512 px — quase 10× de minificação. Eu estava
+decidindo olhando o mapa em 1:1, um tamanho em que o olho nunca o vê. Cada
+painel da bancada mostra a parede na escala real da captura E o detalhe.
+
+**A ablação, que é o que resolveu.** Em vez de mexer em tudo de uma vez,
+separei os dois sinais (`depth: 0` remove a junta e mantém o tom;
+`tomFaixa: 0` mantém a junta e chapa o tom):
+
+| variante | resultado |
+|---|---|
+| só o TOM (sem junta) | **não lê como bloco** |
+| só a JUNTA (tom chapado) | **lê como bloco, igual ao controle** |
+| tom cortado pela metade | continua bloco |
+| nem junta nem tom | liso, sem caráter |
+
+A junta sozinha produz 100% da leitura de alvenaria. **Nas duas tentativas
+anteriores eu tinha reforçado exatamente o sinal que precisava
+enfraquecer.**
+
+Mas apagar a junta deixa a parede lisa como reboco pintado — pior para um
+elemento herói. A saída é a **frequência**, não a força: com 3 fiadas por
+ladrilho a peça tem 53 cm e o olho lê *unidade de alvenaria*; com 10 ela
+cai para 16 cm e o olho lê *estratificação*, que é pedra assentada. Com 14
+a modulação dissolve num chuvisco.
+
+Efeito de segunda ordem que só apareceu depois, e que corrige a conclusão
+da ablação: **com peça pequena o degrau de tom volta a ser visível.** Ele
+era invisível com peça de 53 cm, não em geral. Por isso a faixa de tom foi
+recalibrada de 46 para 32 — em 40 a parede começa a listrar, em 24 perde
+vida.
+
+Valores finais: 10 fiadas, junta de 5 mm rasa (`depth 0,26`) e discreta
+(`albedoCavity 0,35`), tom de 104 a 136, mais o grão de `baseFreq 12` que
+já tinha se mostrado bom.
+
+Medido na cena real, na mesma região da parede:
+
+| região da pedra | antes (bloco) | depois (estratificada) |
+|---|---|---|
+| mediana de luminância | 176,6 | **152,0** |
+| desvio | 18,3 | **19,0** |
+| R / G / B | 189 / 179 / 159 | 163 / 153 / 132 |
+
+O desvio é praticamente **o mesmo**: a variação não aumentou, ela mudou de
+frequência. É a confirmação numérica de que o problema nunca foi *quanta*
+variação existia — foi *onde* ela estava — e portanto de que a tentativa 2,
+que aumentou a variação, atacava a grandeza errada. A parede também
+escureceu 25 níveis, afastando-se do creme estourado que puxava para
+concreto pintado.
+
+A bancada fica no repositório: a página é `dev/`, fora do build, e o
+bundle cresceu 0,2 kB (108,27 → 108,47 kB) — confirmado com `grep` no
+`dist/`, que não contém nada dela.
 
 ### 5. A barra de capítulos não levava a lugar nenhum — CORRIGIDO E MEDIDO
 
@@ -674,7 +730,7 @@ Classificação exigida: DONE / PARCIAL / BLOQUEADO / NÃO MEDIDO. Um item só
 | Poeira lendo como neve | **DONE** | teto de 6 px no `gl_PointSize` (era 51 px a 1 m), mais fade de perto |
 | Transição de luz contando quadros | **DONE** | `0,016/quadro` → relógio real; a 30 fps durava o dobro do pedido |
 | Anti-aliasing, cáusticas, feixes, áudio, Modo Seção, fallback | **DONE** | seções anteriores deste relatório |
-| Núcleo em pedra lendo como bloco | **ACHADO, NÃO RESOLVIDO** | duas tentativas pioraram e foram revertidas; só o ganho de grão ficou |
+| Núcleo em pedra lendo como bloco | **DONE** | ablação: a junta sozinha causava a leitura; 3 → 10 fiadas troca alvenaria por estratificação |
 | Trama regular no gramado | **NÃO MEDIDO** | filtragem do SwiftShader não representa GPU real |
 | Determinismo da cena | **ACHADO, NÃO RESOLVIDO** | vegetação usa `Math.random()` sem semente |
 | Rodapés além das duas paredes norte | **PARCIAL** | não sei onde estão as aberturas e não vou chutar |

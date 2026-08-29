@@ -3104,7 +3104,10 @@ function buildMaterials() {
     // 3. roughness/clearcoat plausíveis para água parada de piscina,
     //    não para um espelho.
     // Granito de jardim: cinza, fosco, com relevo proprio. Nao pode ser
-    // M.stoneCore — aquele e revestimento com fiada de 1,6 m desenhada.
+    // M.stoneCore — aquele e revestimento estratificado, com fiada de
+    // 16 cm desenhada dentro de um ladrilho de 1,6 m. (O comentario dizia
+    // "fiada de 1,6 m": confundia o ladrilho com a fiada, e desde a
+    // recalibracao para 10 fiadas a conta ficou dez vezes errada.)
     pedraJardim: new THREE.MeshStandardMaterial({
       color: 0x8b8880,
       normalMap: (() => { const t = noiseNormalTexture(22, 1.7); t.repeat.set(2, 2); return t; })(),
@@ -3226,49 +3229,51 @@ function buildMaterials() {
     //     veio. Caía na faixa em que não se lê nada, e cada peça saía um
     //     degradê limpo. `baseFreq: 12` põe a feição em ~13 cm e a quinta
     //     oitava traz o grão fino de volta. Esta parte funcionou.
-    //  2. A PAREDE LÊ COMO BLOCO DE CONCRETO — ACHADO, NÃO RESOLVIDO.
+    //  2. A PAREDE LIA COMO BLOCO DE CONCRETO — e a causa era a FIADA,
+    //     não a junta em si.
     //
-    //     Tentei duas vezes e ERREI as duas, cada uma de um jeito. Fica
-    //     registrado porque a próxima pessoa vai ter as mesmas ideias:
+    //     Tentei corrigir duas vezes no olho e errei as duas, porque
+    //     mexia em junta, tom e número de fiadas ao mesmo tempo e o
+    //     resultado só aparecia depois de ~10 min de cena (esta máquina
+    //     renderiza a 0,1 quadro por segundo), já misturado com luz,
+    //     névoa e vegetação aleatória.
     //
-    //     Tentativa 1 — "a junta está fraca demais". É verdade que com
-    //     9 mm num mapa de 512 px cobrindo 1,6 m ela cai em ~1 px de tela
-    //     e o mipmap a dissolve. Alarguei para 1,8 cm e escureci no
-    //     albedo. Resultado: a leitura de bloco ficou MAIS categórica.
-    //     Junta forte + peça média + amarração corrida é a definição
-    //     visual de alvenaria; eu tinha reforçado justamente o sinal
-    //     errado.
+    //     Resolvido com ablação, na bancada de `pedra-lab.ts`, que gera
+    //     o albedo pelas mesmas funções e desenha num canvas em segundos:
     //
-    //     Tentativa 2 — "então são as peças: menos fiadas, painel
-    //     grande, junta fina, e mais variação de tom peça a peça".
-    //     Resultado: TABULEIRO DE XADREZ. Com 2 fiadas e 1-2 peças por
-    //     ladrilho, o tom por peça vira poucas células grandes, e o
-    //     ladrilho se repete ~4,4 vezes na parede: a variação maior não
-    //     virou riqueza, virou padrão regular de dois tons.
+    //       só o TOM (depth 0, sem junta)      -> NÃO lê como bloco
+    //       só a JUNTA (tom chapado)           -> lê como bloco
+    //       tom cortado pela metade            -> continua bloco
     //
-    //     O que sobra e É melhoria real está mantido: `baseFreq` de 6
-    //     para 12 e uma quinta oitava. Antes as feições tinham 27 cm —
-    //     grosso demais para grão, fino demais para veio — e a face da
-    //     peça saía um degradê limpo, sem superfície nenhuma. Isso
-    //     apareceu bem nas duas capturas e não tem efeito colateral.
+    //     A junta sozinha produz a leitura inteira. Mas apagá-la deixa a
+    //     parede lisa como reboco pintado, o que é pior para um elemento
+    //     herói. A saída é a FREQUÊNCIA, não a força: com 3 fiadas por
+    //     ladrilho a peça tem 53 cm e o olho lê UNIDADE DE ALVENARIA; com
+    //     10 ela cai para 16 cm e o olho lê ESTRATIFICAÇÃO — pedra
+    //     assentada, que é o que o projeto quer. Com 14 a modulação
+    //     dissolve num chuvisco e a pedra perde caráter.
     //
-    //     Todo o resto volta ao valor anterior. Ficar iterando no escuro
-    //     aqui custa ~10 min por rodada (esta máquina renderiza a 0,1
-    //     quadro por segundo) e já produziu duas regressões. O caminho
-    //     certo é inspecionar o ALBEDO GERADO direto, sem passar pela
-    //     cena, e só então mexer.
+    //     Um efeito de segunda ordem que só apareceu depois: com peça
+    //     PEQUENA o degrau de tom volta a ser visível (com peça de 53 cm
+    //     ele era invisível). Por isso a faixa de tom foi recalibrada de
+    //     46 para 32 — em 40 a parede começa a listrar, em 24 perde vida.
+    //
+    //     `baseFreq` 6 -> 12 mais a quinta oitava vieram de antes e
+    //     ficam: davam feição de 27 cm, grossa demais para grão e fina
+    //     demais para veio, e a face da peça saía um degradê sem
+    //     superfície.
     const h = heightField(pbrSize, { octaves: 5, baseFreq: 12, persistence: 0.5, seed: 53 });
     for (let i = 0; i < h.length; i++) h[i] = 0.45 + h[i] * 0.55;   // face do bloco
-    const tomBloco = carveCourses(h, pbrSize, { courses: 3, depth: 0.5, jointWidth: 0.005, seed: 11 });
+    const tomBloco = carveCourses(h, pbrSize, { courses: 10, depth: 0.26, jointWidth: 0.003, seed: 11 });
     const maps = pbrFromHeight(pbrSize, h, (alt, cav, x, y, size) => {
       // dois níveis de variação: o tom da PEÇA e o grão DENTRO da peça
       const peca = tomBloco[y * size + x];
-      const base = 104 + peca * 46;          // peça a peça
+      const base = 104 + peca * 32;          // peça a peça
       const grao = alt * 26;                 // grão interno
       const v = base + grao;
       return [_clamp255(v * 1.03), _clamp255(v * 0.98), _clamp255(v * 0.88)];
     }, { normalStrength: 3.0, cavityRadius: 3, cavityGain: 14, roughBase: 0.9, roughVar: 0.1,
-         aoStrength: 1.0, albedoCavity: 0.5 });
+         aoStrength: 1.0, albedoCavity: 0.35 });
     applyPBR(M.stoneCore, maps, 1.0);
   }
 
@@ -7325,3 +7330,22 @@ export { init, showFallback, Experience, Quality, Perf, CONFIG, goToChapter,
          solarTime, currentFPS, lampLights, houseGroup,
          waterObj, sunLight, currentLightMode };
 export function _cenaPronta() { return !!(scene && renderer); }
+
+// ------------------------------------------------------------
+// PIPELINE DE TEXTURA, EXPOSTO PARA INSPEÇÃO
+//
+// Não é enfeite: é a correção de um problema de MÉTODO que custou duas
+// regressões no núcleo em pedra. Para ver o efeito de mudar `courses` ou
+// `jointWidth` eu estava rebuildando e rodando a cena inteira — ~10 min
+// por tentativa nesta máquina, e o resultado chegava misturado com
+// iluminação, névoa, tone mapping e a vegetação (que é aleatória a cada
+// carregamento). Julgar uma textura assim é adivinhar.
+//
+// Estas quatro funções são PURAS e não dependem de cena, renderizador ou
+// WebGL. Expostas, o mapa gerado pode ser desenhado num canvas e olhado
+// a 1:1 em segundos. `src/legado/pedra-lab.ts` faz exatamente isso.
+//
+// Nada aqui é chamado em produção; o bundler remove por tree-shaking o
+// que a aplicação não importa.
+// ------------------------------------------------------------
+export { heightField, cavityField, carveCourses, pbrFromHeight };
