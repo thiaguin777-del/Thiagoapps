@@ -5007,8 +5007,121 @@ function buildLivingRoom() {
   bowl.position.set(-8.2, 0.38, -0.45);
   g.add(bowl);
 
-  const baseboard = createBaseboardRun([[-11.0, -6.0], [2.5, -6.0]], 0.09, M.portaEscura);
-  g.add(baseboard);
+  // O rodapé que existia aqui — uma corrida só, na parede norte — foi
+  // substituído pelo pacote de acabamento em `buildInteriorTrim()`, que
+  // cobre TODAS as paredes internas e usa junta de sombra em vez de
+  // rodapé saliente. Mantê-lo aqui deixaria uma peça de madeira de 9 cm
+  // brigando com a junta de 4 cm na mesma parede.
+
+  houseGroup.add(g);
+  return g;
+}
+
+// ============================================================
+// ACABAMENTO INTERNO — a parte que separa render de projeto
+// ------------------------------------------------------------
+// Antes daqui as paredes internas encontravam o piso e o teto em aresta
+// viva, sem nenhuma peça de transição. É o que faz um interior 3D ler
+// como "caixa branca" mesmo com bons móveis: no mundo real nenhuma
+// parede toca o piso sem rodapé, junta ou reserva.
+//
+// O registro é o pedido — contemporâneo/futurista — então NÃO é rodapé
+// de madeira saliente:
+//
+//  - no piso, JUNTA DE SOMBRA: uma reentrância escura de 4 cm, embutida
+//    1,5 cm na parede. É o detalhe que estúdio de alto padrão usa
+//    justamente para a parede parecer que flutua;
+//  - no teto, SANCA COM LED LINEAR: uma reserva com uma fita emissiva
+//    que acende ao anoitecer.
+//
+// A fita entra em `emissiveFixtures`, que é a lista que `applySolarTime`
+// já rampeia junto com as luminárias. Um material só para todas as
+// corridas — assim a casa inteira acende no MESMO instante, que é como
+// uma instalação de LED se comporta. Com um material por trecho, o
+// escalonamento por índice acenderia a sala antes do corredor.
+//
+// Custo: emissivo não é luz. Não entra no orçamento de luzes, não
+// projeta sombra e não avalia BRDF nenhum — é cor somada no fragmento.
+//
+// AS COORDENADAS SÃO LIDAS, NÃO CHUTADAS. Numa passada anterior eu
+// deixei este item pela metade dizendo que não sabia onde ficavam as
+// aberturas. As paredes estão em `buildArchitecture`:
+//
+//   social norte    z = -6,10  x de -11,25 a  2,95   (sólida)
+//   social oeste    x = -11,10 z de  -6,10 a  6,10   (janela em y 1,0-2,6)
+//   suíte norte     z = -6,10  x de   3,90 a 12,10   (sólida)
+//   suíte leste     x =  12,10 z de  -6,10 a  6,10   (janela em y 1,0-2,6)
+//   partição        x =   9,30 z de  -5,00 a  3,00
+//
+// As janelas oeste e leste começam a 1 m do piso, então a junta passa
+// INTEIRA por baixo delas — era exatamente isso que eu não sabia. Onde a
+// vedação é vidro do piso ao teto (fachada sul, z = 6,0) não há corrida
+// nenhuma: ali quem faz a transição é a soleira de concreto que já
+// existe (`socialSill`).
+const TRIM_Y_TETO = 3.06;      // abaixo da laje em 3,2
+const TRIM_LED = 0.035;
+
+function buildInteriorTrim() {
+  const g = new THREE.Group();
+
+  // Reentrância escura e fosca: ela existe para NÃO ser notada como peça,
+  // só como sombra. Qualquer brilho aqui denuncia que é um objeto.
+  const matJunta = new THREE.MeshStandardMaterial({
+    color: 0x16171a, roughness: 0.95, metalness: 0, envMapIntensity: 0.15,
+  });
+  // A sanca é clara: ela recebe o quique da fita e devolve para o teto.
+  const matSanca = new THREE.MeshStandardMaterial({
+    color: 0xe8e4dc, roughness: 0.9, metalness: 0, envMapIntensity: 0.25,
+  });
+  const matLed = new THREE.MeshStandardMaterial({
+    color: 0xfff1d8, roughness: 1, metalness: 0,
+    emissive: 0xffdca8, emissiveIntensity: 0,
+  });
+  // Nome para poder achá-lo por travessia e desligá-lo em tempo de
+  // execução. Sem isso, "a sanca estourou a sala?" só se responde
+  // rebuildando — e a resposta chega junto com todo o resto que mudou.
+  matLed.name = 'casaAura_led_sanca';
+  emissiveFixtures.push(matLed);
+
+  // [x0, z0, x1, z1, nx, nz] — n aponta PARA DENTRO do cômodo, e é ele
+  // que decide para que lado a junta recua e a sanca avança.
+  const CORRIDAS = [
+    // ala social
+    [-10.99, -5.99,   2.60, -5.99,  0,  1],   // norte
+    [-10.99, -5.99, -10.99,  5.90,  1,  0],   // oeste (janela alta, não corta)
+    [  2.60, -5.99,   2.60,  1.00, -1,  0],   // face oeste do núcleo de pedra
+    // suíte
+    [  4.25, -5.99,  11.99, -5.99,  0,  1],   // norte
+    [ 11.99, -5.99,  11.99,  5.90, -1,  0],   // leste (janela alta)
+    [  9.21, -5.00,   9.21,  3.00, -1,  0],   // partição, face do quarto
+    [  9.39, -5.00,   9.39,  3.00,  1,  0],   // partição, face do banho
+  ];
+
+  for (const [x0, z0, x1, z1, nx, nz] of CORRIDAS) {
+    const dx = x1 - x0, dz = z1 - z0;
+    const comp = Math.hypot(dx, dz);
+    if (comp < 0.05) continue;
+    const cx = (x0 + x1) / 2, cz = (z0 + z1) / 2;
+    const rot = -Math.atan2(dz, dx);
+
+    // junta de sombra: recuada 1,5 cm PARA DENTRO da parede
+    const junta = box(comp, 0.04, 0.03, matJunta, false);
+    junta.position.set(cx - nx * 0.015, 0.09, cz - nz * 0.015);
+    junta.rotation.y = rot;
+    g.add(junta);
+
+    // sanca: avança 6 cm para dentro do cômodo
+    const sanca = box(comp, 0.10, 0.12, matSanca, false);
+    sanca.position.set(cx + nx * 0.06, TRIM_Y_TETO, cz + nz * 0.06);
+    sanca.rotation.y = rot;
+    g.add(sanca);
+
+    // fita de LED, escondida sob a aba da sanca e voltada para o teto
+    const led = box(comp - 0.04, TRIM_LED, 0.02, matLed, false);
+    led.position.set(cx + nx * 0.035, TRIM_Y_TETO + 0.07, cz + nz * 0.035);
+    led.rotation.y = rot;
+    g.add(led);
+  }
 
   houseGroup.add(g);
   return g;
@@ -6235,6 +6348,10 @@ async function buildScene(onProgress) {
     ['Jantar', buildDining],
     ['Cozinha', buildKitchen],
     ['Suíte Master', buildPrimarySuite],
+    // Depois dos cômodos: as corridas seguem as paredes de
+    // `buildArchitecture`, e o grupo próprio deixa a fusão por material
+    // juntar as sete corridas em três malhas.
+    ['Acabamento Interno', buildInteriorTrim],
     ['Nível Superior', buildUpperLevel],
     ['Piscina & Deck', buildPoolAndDeck],
     ['Paisagismo', buildLandscaping],
