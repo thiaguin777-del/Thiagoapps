@@ -6127,6 +6127,62 @@ function buildGround() {
 // Etapas reais (não é barra de progresso falsa): cada etapa corresponde a
 // um grupo de objetos de verdade sendo criado.
 // ============================================================
+// ============================================================
+// SEMENTE — a cena precisa ser a MESMA em toda visita
+// ------------------------------------------------------------
+// ACHADO tentando comparar duas capturas: a vegetação sorteia posição,
+// porte e inclinação com `Math.random()`, sem semente. São 127 chamadas
+// no arquivo. Consequências, em ordem de gravidade:
+//
+//  1. ESTE É UM MATERIAL DE VENDA. O corretor abre a casa numa reunião,
+//     abre de novo na seguinte, e o jardim está diferente. Uma maquete
+//     que muda sozinha não é uma maquete do imóvel.
+//  2. Nenhum A/B de imagem é confiável perto de vegetação: metade da
+//     diferença entre dois quadros é o sorteio, não a mudança. Passei
+//     por isso medindo o telhado e tive de escolher métricas imunes ao
+//     sorteio (razão de canal na mesma superfície) para contornar.
+//
+// Trocar as 127 chamadas seria invasivo e fácil de errar. Em vez disso,
+// `Math.random` é substituído por um gerador semeado DURANTE cada etapa
+// síncrona de construção, e devolvido em seguida.
+//
+// POR ETAPA, e não uma vez para a cena inteira, por dois motivos:
+//  - `buildScene` é async e cede um quadro entre etapas; com o patch
+//    instalado atravessando o `await`, qualquer outro código que sorteie
+//    nesse intervalo (three, gsap, o laço de render) entraria no mesmo
+//    fluxo e o resultado deixaria de ser reproduzível;
+//  - cada etapa ganha um fluxo próprio, derivado do NOME dela. Mexer no
+//    paisagismo passa a não deslocar o sorteio da arquitetura.
+//
+// `?semente=N` troca o conjunto inteiro, para quem quiser outra
+// implantação de jardim sem mexer em código.
+const _SEMENTE_BASE = (() => {
+  const p = new URLSearchParams(location.search).get('semente');
+  const n = p === null ? NaN : Number(p);
+  return Number.isFinite(n) ? (n >>> 0) : 0x9e3779b9;
+})();
+
+function comSementeFixa(rotulo, fn) {
+  // FNV-1a do rótulo, misturado com a semente base: rótulos diferentes
+  // dão fluxos independentes, e nenhum deles é zero (xorshift travaria).
+  let s = (2166136261 ^ _SEMENTE_BASE) >>> 0;
+  for (let i = 0; i < rotulo.length; i++) {
+    s = Math.imul(s ^ rotulo.charCodeAt(i), 16777619) >>> 0;
+  }
+  if (s === 0) s = 1;
+  const original = Math.random;
+  Math.random = () => {
+    s ^= s << 13; s >>>= 0;
+    s ^= s >>> 17;
+    s ^= s << 5;  s >>>= 0;
+    return s / 4294967296;
+  };
+  // `finally`: se uma etapa lançar, o `Math.random` do resto da página
+  // não pode ficar sequestrado — inclusive porque o próprio caminho de
+  // fallback roda depois.
+  try { return fn(); } finally { Math.random = original; }
+}
+
 async function buildScene(onProgress) {
   const _tBoot = performance.now();
   const steps = [
@@ -6180,7 +6236,7 @@ async function buildScene(onProgress) {
     BuildTrace.start(name);
     const t0 = performance.now();
     try {
-      const r = fn();
+      const r = comSementeFixa(name, fn);
       if (r && r.isObject3D) builtGroups.push([name, r]);
     } catch (e) {
       BuildTrace.fail(name, e);
