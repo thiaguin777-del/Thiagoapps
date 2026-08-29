@@ -340,6 +340,41 @@ e 5,9% depois, ou seja, mede a mobília. A prova aqui é a aritmética acima
 mais as duas capturas; o teto de 6 px é exato e não depende de
 interpretação.
 
+### 7. Transição de luz contava QUADROS, não tempo — CORRIGIDO
+
+Encontrado na varredura final, que passou a chamar `goToChapter` de
+verdade em vez de dirigir a câmera na mão. O capítulo "Piscina" declara
+`light: "golden"`, e a sonda registrou `luz: "day", solar: 0` **34 s
+depois de entrar nele**.
+
+Não era o capítulo: era `setLightMode`, que avançava `0,016 / dur` por
+quadro — 60 fps cravados no código. Quem roda a 30 fps leva o **dobro**
+do tempo pedido (3,6 s numa transição de 1,8 s), e aparelho móvel a 30
+fps é exatamente o que o resto do projeto passa o tempo protegendo. Aqui,
+a 0,1 quadro por segundo, os 1,8 s viravam **dezenove minutos**.
+
+Trocado por relógio real (`performance.now()`), com `dt` limitado a
+0,05 s para que uma engasgada não dê um salto na luz. Acima de 20 fps a
+transição passa a durar exatamente o que pede; abaixo disso ela estica,
+que é preferível a pular.
+
+O que isso vale no aparelho alvo, que é onde importa:
+
+| taxa de quadros | avanço por quadro, antes | depois | duração de uma transição de 1,8 s |
+|---|---|---|---|
+| 60 fps | 0,0089 | 0,0093 | 1,8 s → 1,8 s (era o único caso certo) |
+| 30 fps | 0,0089 | 0,0185 | **3,6 s → 1,8 s** |
+| 20 fps | 0,0089 | 0,0278 | 5,4 s → 1,8 s |
+
+Conferido em navegador nesta máquina, onde o efeito é caricato: o
+`solarTime` sai de 0 e avança 0,006 → 0,044 → 0,148 → 0,351 em 180 s, de
+forma monótona, com **0 erros**. Antes, a varredura registrava 0,003
+depois de 34 s — praticamente parado.
+
+Vale registrar que este defeito **só apareceu porque o conserto anterior
+tornou a navegação por capítulos utilizável**. Os dois últimos achados
+desta rodada saíram um do outro.
+
 ### Encontrado, reproduzido e NÃO corrigido
 
 - **Trama regular no gramado.** Volta a aparecer em ângulo rasante, apesar
@@ -621,6 +656,40 @@ módulos próprios.
 
 *(A rodada de navegador que faltava foi feita — ver "Verificação final"
 no topo. Zero erros.)*
+
+---
+
+## Situação de cada área, sem arredondar
+
+Classificação exigida: DONE / PARCIAL / BLOQUEADO / NÃO MEDIDO. Um item só
+é DONE se existe uma medida que o comprove.
+
+| área | situação | o que sustenta |
+|---|---|---|
+| Cobertura lendo como água | **DONE** | razão B÷R de 1,35 → 0,90 na mesma superfície |
+| Perspectiva aérea com degrau | **DONE** | maior salto de névoa entre faixas povoadas: 20,9 → 7,1 pontos |
+| Galhos como varas contra o céu | **DONE** | 38,3% → 0,4% das pontas fora da copa (200 mil árvores simuladas) |
+| Barra de capítulos (interno) | **DONE** | expulso a 29,02 m → para em 0,09 m e fica aos 45 s |
+| Barra de capítulos (voo externo) | **DONE** | não saía do lugar → chega a 0,00 m e fica |
+| Poeira lendo como neve | **DONE** | teto de 6 px no `gl_PointSize` (era 51 px a 1 m), mais fade de perto |
+| Transição de luz contando quadros | **DONE** | `0,016/quadro` → relógio real; a 30 fps durava o dobro do pedido |
+| Anti-aliasing, cáusticas, feixes, áudio, Modo Seção, fallback | **DONE** | seções anteriores deste relatório |
+| Núcleo em pedra lendo como bloco | **ACHADO, NÃO RESOLVIDO** | duas tentativas pioraram e foram revertidas; só o ganho de grão ficou |
+| Trama regular no gramado | **NÃO MEDIDO** | filtragem do SwiftShader não representa GPU real |
+| Determinismo da cena | **ACHADO, NÃO RESOLVIDO** | vegetação usa `Math.random()` sem semente |
+| Rodapés além das duas paredes norte | **PARCIAL** | não sei onde estão as aberturas e não vou chutar |
+| Desempenho (FPS, tempo de quadro) | **NÃO MEDIDO** | esta máquina não tem GPU |
+| Galeria 360° | **BLOQUEADO** | não há panorama nenhum no repositório |
+| Supabase | **BLOQUEADO** | criar o projeto é ação cobrada, na conta do Thiago |
+| KTX2, PMREM assado, BatchedMesh, BVH, SSR, TAA, LOD de vegetação, lightmaps, culling por portais | **NÃO INICIADO** | escopo original, nunca começado |
+
+**O que isto NÃO é.** Não é "o prompt implementado". Seis defeitos foram
+encontrados medindo e corrigidos com medida; um foi encontrado, atacado
+duas vezes, piorado duas vezes e revertido; dois estão reproduzidos e sem
+correção; três estão bloqueados por dependência externa; e a lista de
+otimizações do escopo original continua sem começar. A linha de base de
+desempenho tem contagem de objetos, de chamadas e de triângulos — não tem
+FPS, e não vai ter enquanto rodar aqui.
 
 ---
 

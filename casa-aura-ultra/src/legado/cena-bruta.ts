@@ -1390,10 +1390,27 @@ function setLightMode(mode, dur) {
   const from = solarTime;
   const myId = ++solarAnimId;
   if (dur <= 0.02 || Capability.reducedMotion) { applySolarTime(target); return; }
+  // ACHADO MEDINDO: a transição avançava `0,016 / dur` por QUADRO, ou
+  // seja, assumia 60 fps cravados. Quem roda em 30 fps leva o DOBRO do
+  // tempo pedido — 3,6 s numa transição de 1,8 s — e é justamente o
+  // aparelho móvel que o resto do projeto passa o tempo protegendo.
+  //
+  // Apareceu aqui de forma escandalosa: nesta máquina, sem GPU, a 0,1
+  // quadro por segundo, os 1,8 s viravam DEZENOVE MINUTOS. A varredura
+  // final registrou `luz: "day", solar: 0` no capítulo Piscina, que pede
+  // `golden` — não porque o capítulo esteja errado, mas porque a
+  // transição mal tinha começado 34 s depois.
+  //
+  // Relógio de verdade em vez de contagem de quadros. `dt` limitado a
+  // 0,05 s para que uma engasgada não dê um salto na luz.
   let e = 0;
+  let anterior = performance.now();
   const tick = () => {
     if (myId !== solarAnimId) return; // outra transição assumiu
-    e += 0.016 / dur;
+    const agora = performance.now();
+    const dt = Math.min((agora - anterior) / 1000, 0.05);
+    anterior = agora;
+    e += dt / dur;
     if (e > 1) e = 1;
     const k = e < 0.5 ? 4 * e * e * e : 1 - Math.pow(-2 * e + 2, 3) / 2;
     applySolarTime(_lerp(from, target, k));
