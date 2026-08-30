@@ -17,6 +17,14 @@
 // encontrar, mesmo dentro de uma string JavaScript. Sem escapar, um
 // shader ou um comentário que contenha esse texto corta o arquivo ao
 // meio.
+//
+// E o conteúdo entra por FUNÇÃO de substituição, nunca por string. Em
+// `String.replace`, a string de substituição interpreta `$&`, `` $` ``,
+// `$'` e `$$` como padrões — e o bundle tem 1,3 MB de código que ninguém
+// auditou procurando cifrão. Um `$&` perdido ali dentro reinjetaria o
+// trecho casado no meio do script e o truncaria num SyntaxError, com a
+// conferência de referência absoluta passando do mesmo jeito. Uma função
+// devolve o texto literal e o problema deixa de existir.
 import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -50,13 +58,11 @@ html = html.replace(/<script>[^<]*serviceWorker[\s\S]*?<\/script>\s*/g, '');
 // e a aplicação morre no primeiro `appendChild` com "Cannot read
 // properties of null" — que foi exatamente o que aconteceu.
 html = html.replace(/<script[^>]*src="\/app\.js"[^>]*><\/script>\s*/, '');
-html = html.replace(
-  /<\/body>/,
-  `<script>\n${js.replace(/<\/script>/g, '<\\/script>')}\n</script>\n</body>`,
-);
+const jsSeguro = js.replace(/<\/script>/g, '<\\/script>');
+html = html.replace(/<\/body>/, () => `<script>\n${jsSeguro}\n</script>\n</body>`);
 html = html.replace(
   /<link rel="stylesheet"[^>]*href="\/app\.css"[^>]*>/,
-  `<style>\n${css}\n</style>`,
+  () => `<style>\n${css}\n</style>`,
 );
 
 // A conferência tem de olhar só o MARCADOR. Rodada sobre o arquivo

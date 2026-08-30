@@ -65,8 +65,13 @@ const N = 4;
 interface Caso { nome: string; nota: string; opts: Record<string, number> }
 
 const CASOS: Caso[] = [
-  { nome: 'ATUAL', nota: '26 manchas de raio 15%–45%', opts: {} },
-  { nome: 'Manchas menores', nota: 'raio 6%–16%', opts: { manchaMin: 0.06, manchaVar: 0.10 } },
+  // O controle tem de ser o que a CENA USA HOJE, e não o que ela usava
+  // antes desta bancada existir. Com `opts: {}` o painel "ATUAL" media
+  // uma configuração que o projeto já não envia — uma bancada cujo
+  // controle não é o código mede outra coisa.
+  { nome: 'ATUAL (o que a cena envia)', nota: '26 manchas de raio 6%–16%',
+    opts: { manchaMin: 0.06, manchaVar: 0.10 } },
+  { nome: 'ANTERIOR', nota: '26 manchas de raio 15%–45% — a que tilava', opts: {} },
   { nome: 'Menores e mais', nota: '60 manchas de raio 5%–13%', opts: { manchas: 60, manchaMin: 0.05, manchaVar: 0.08 } },
   { nome: 'Sem manchas', nota: 'só as lâminas — o piso da comparação', opts: { manchas: 0 } },
 ];

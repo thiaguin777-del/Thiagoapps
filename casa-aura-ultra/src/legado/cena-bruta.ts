@@ -50,6 +50,10 @@ window.__casaAuraModuleStarted = true;
 const BuildTrace = {
   currentStep: 'boot',
   completedSteps: [],
+  // Preenchido por `buildScene` a partir do proprio array de etapas. Era
+  // um 11 escrito a mao no painel de debug, e virou "12/11 etapas" na
+  // primeira etapa acrescentada.
+  totalSteps: 0,
   failedStep: null,
   error: null,
   start(step) { this.currentStep = step; },
@@ -5149,69 +5153,80 @@ function buildLivingRoom() {
 // vedação é vidro do piso ao teto (fachada sul, z = 6,0) não há corrida
 // nenhuma: ali quem faz a transição é a soleira de concreto que já
 // existe (`socialSill`).
-const TRIM_Y_TETO = 3.06;      // abaixo da laje em 3,2
-const TRIM_LED = 0.035;
+// Altura do rasgo de cove. A MESMA das coves que ja existiam
+// (`cove`, `taskLight`, `headCove` estao todas em y = 3,02): duas alturas
+// diferentes de rasgo na mesma casa leem como erro de obra.
+const TRIM_Y_COVE = 3.02;
+/** Topo do piso acabado: `floorSocial`/`floorPrivate` tem 0,12 de espessura. */
+const TRIM_PISO = 0.12;
 
 function buildInteriorTrim() {
   const g = new THREE.Group();
 
-  // Reentrância escura e fosca: ela existe para NÃO ser notada como peça,
-  // só como sombra. Qualquer brilho aqui denuncia que é um objeto.
+  // Reentrancia escura e fosca: ela existe para NAO ser notada como peca,
+  // so como sombra. Qualquer brilho aqui denuncia que e um objeto.
   const matJunta = new THREE.MeshStandardMaterial({
     color: 0x16171a, roughness: 0.95, metalness: 0, envMapIntensity: 0.15,
   });
-  // A sanca é clara: ela recebe o quique da fita e devolve para o teto.
-  const matSanca = new THREE.MeshStandardMaterial({
-    color: 0xe8e4dc, roughness: 0.9, metalness: 0, envMapIntensity: 0.25,
-  });
-  const matLed = new THREE.MeshStandardMaterial({
-    color: 0xfff1d8, roughness: 1, metalness: 0,
-    emissive: 0xffdca8, emissiveIntensity: 0,
-  });
-  // Nome para poder achá-lo por travessia e desligá-lo em tempo de
-  // execução. Sem isso, "a sanca estourou a sala?" só se responde
-  // rebuildando — e a resposta chega junto com todo o resto que mudou.
-  matLed.name = 'casaAura_led_sanca';
-  emissiveFixtures.push(matLed);
 
-  // [x0, z0, x1, z1, nx, nz] — n aponta PARA DENTRO do cômodo, e é ele
-  // que decide para que lado a junta recua e a sanca avança.
+  // [x0, z0, x1, z1, nx, nz, temCove] -- n aponta PARA DENTRO do comodo, e
+  // e ele que decide para que lado a junta recua e a cove avanca.
+  //
+  // `temCove` marca as paredes que JA tinham iluminacao de cove antes
+  // desta funcao existir. Elas ganham so a junta de piso; por cima elas
+  // ja estao servidas, e uma segunda fita a 29 cm da primeira e defeito,
+  // nao acabamento.
   const CORRIDAS = [
     // ala social
-    [-10.99, -5.99,   2.60, -5.99,  0,  1],   // norte
-    [-10.99, -5.99, -10.99,  5.90,  1,  0],   // oeste (janela alta, não corta)
-    [  2.60, -5.99,   2.60,  1.00, -1,  0],   // face oeste do núcleo de pedra
-    // suíte
-    [  4.25, -5.99,  11.99, -5.99,  0,  1],   // norte
-    [ 11.99, -5.99,  11.99,  5.90, -1,  0],   // leste (janela alta)
-    [  9.21, -5.00,   9.21,  3.00, -1,  0],   // partição, face do quarto
-    [  9.39, -5.00,   9.39,  3.00,  1,  0],   // partição, face do banho
+    [-10.99, -5.99,   2.60, -5.99,  0,  1, true ],  // norte  -> `cove` em (-8,4 / 3,02 / -5,7)
+    [-10.99, -5.99, -10.99,  5.90,  1,  0, false],  // oeste (janela alta, nao corta)
+    [  2.60, -5.99,   2.60,  1.00, -1,  0, false],  // face oeste do nucleo de pedra
+    // suite
+    [  4.25, -5.99,  11.99, -5.99,  0,  1, true ],  // norte  -> `headCove` em (6,5 / 3,02 / -5,86)
+    [ 11.99, -5.99,  11.99,  5.90, -1,  0, false],  // leste (janela alta)
+    // A particao tem 3,0 m de altura (box(0,18 / 3,0 / 8,0) em y = 1,5),
+    // e nao 3,2 como as paredes externas: uma cove em 3,02 ficaria
+    // flutuando acima do topo dela. Fica so com a junta.
+    [  9.21, -5.00,   9.21,  3.00, -1,  0, false, true ],  // particao, face do quarto
+    [  9.39, -5.00,   9.39,  3.00,  1,  0, false, true ],  // particao, face do banho
   ];
 
-  for (const [x0, z0, x1, z1, nx, nz] of CORRIDAS) {
+  for (const [x0, z0, x1, z1, nx, nz, temCove, baixa] of CORRIDAS) {
     const dx = x1 - x0, dz = z1 - z0;
     const comp = Math.hypot(dx, dz);
     if (comp < 0.05) continue;
     const cx = (x0 + x1) / 2, cz = (z0 + z1) / 2;
     const rot = -Math.atan2(dz, dx);
 
-    // junta de sombra: recuada 1,5 cm PARA DENTRO da parede
+    // Junta de sombra, ASSENTADA SOBRE O PISO e recuada 1,5 cm para
+    // dentro da parede.
+    //
+    // A primeira versao punha o centro em y = 0,09 com 4 cm de altura,
+    // ou seja de 0,07 a 0,11 -- inteiramente DENTRO da laje de piso, que
+    // vai ate 0,12. A peca nunca renderizou. Pior: eu olhei a captura,
+    // vi a sombra do encontro parede/piso e dei a coisa por verificada.
+    // A sombra do encontro sempre esteve la; o que nao estava era isto.
     const junta = box(comp, 0.04, 0.03, matJunta, false);
-    junta.position.set(cx - nx * 0.015, 0.09, cz - nz * 0.015);
+    junta.position.set(cx - nx * 0.015, TRIM_PISO + 0.02, cz - nz * 0.015);
     junta.rotation.y = rot;
     g.add(junta);
 
-    // sanca: avança 6 cm para dentro do cômodo
-    const sanca = box(comp, 0.10, 0.12, matSanca, false);
-    sanca.position.set(cx + nx * 0.06, TRIM_Y_TETO, cz + nz * 0.06);
-    sanca.rotation.y = rot;
-    g.add(sanca);
+    if (temCove || baixa) continue;
 
-    // fita de LED, escondida sob a aba da sanca e voltada para o teto
-    const led = box(comp - 0.04, TRIM_LED, 0.02, matLed, false);
-    led.position.set(cx + nx * 0.035, TRIM_Y_TETO + 0.07, cz + nz * 0.035);
-    led.rotation.y = rot;
-    g.add(led);
+    // Cove pela funcao QUE JA EXISTE, e nao por uma paralela.
+    //
+    // Eu tinha escrito aqui uma sanca propria com fita emissiva. Alem de
+    // duplicar `createCoveLight`, ela repetia um defeito que aquela
+    // funcao ja tinha corrigido: a fita dela fixa `envMapIntensity: 0`
+    // com o comentario "a fita nao pode reagir ao ceu: era isso que a
+    // deixava branca de dia". A minha nao fixava, entao herdava 1,0.
+    const cove = createCoveLight(comp - 0.04, 0xffd9a8);
+    cove.position.set(cx + nx * 0.06, TRIM_Y_COVE, cz + nz * 0.06);
+    // `createCoveLight` monta a peca ao longo de X com a testeira em +z.
+    // Girar em torno de Y alinha as duas coisas de uma vez.
+    cove.rotation.y = rot;
+    g.add(cove);
+    collectLamps(cove);
   }
 
   houseGroup.add(g);
@@ -6470,6 +6485,7 @@ async function buildScene(onProgress) {
   // diferentes. Fica sempre ligado (é um número por etapa) e sai no
   // console com ?debug=1.
   Perf.steps = [];
+  BuildTrace.totalSteps = steps.length;
   for (let i = 0; i < steps.length; i++) {
     const [name, fn] = steps[i];
     BuildTrace.start(name);
@@ -7000,6 +7016,11 @@ function goToChapter(idx, showUI) {
   // Modo Apresentação.
   if (transitionNeedsCut(startPos, endPos)) {
     // CORTE: a trajetória cruzaria o edifício. Reposiciona atrás do fade.
+    // `chapterCamMove` PRECISA cair aqui: se um voo estava em curso e o
+    // capítulo seguinte exige corte, a flag ficaria ligada e o
+    // `lerpCam()` seguiria perseguindo a câmera através da fachada
+    // durante o fade, com o `clampFreeCamera()` isento.
+    chapterCamMove = false;
     camCurve = null;
     doFadeCut(() => {
       camera.position.copy(endPos);
@@ -7009,6 +7030,11 @@ function goToChapter(idx, showUI) {
     });
   } else {
     chapterCamMove = true;
+    // Orbit fora do laço enquanto o voo conduz — `toggleReveal()` faz
+    // exatamente isto pelo mesmo motivo. Sem desligar, o amortecimento do
+    // OrbitControls disputa a câmera com `lerpCam()` durante o percurso
+    // inteiro; a chegada já devolve `controls.enabled = true`.
+    controls.enabled = false;
     // VOO: caminho livre. O ponto médio sobe acima da cobertura para dar
     // um arco cinematográfico — e nunca rasante ao telhado.
     const midPos = startPos.clone().lerp(endPos, 0.5);
@@ -7330,7 +7356,9 @@ function setupDebugPanel() {
     const ft = currentFPS > 0 ? (1000 / currentFPS) : 0;
     if (ft > 0) { ftMin = Math.min(ftMin, ft); ftMax = Math.max(ftMax, ft); ftSum += ft; ftN++; }
     const stepsLine = BuildTrace.completedSteps.length
-      ? BuildTrace.completedSteps.length + '/11 etapas'
+      // Contagem VIVA. Estava fixa em 11 e o painel passou a mostrar
+      // "12/11 etapas" assim que uma etapa foi acrescentada.
+      ? BuildTrace.completedSteps.length + '/' + BuildTrace.totalSteps + ' etapas'
       : '(construindo)';
     const failLine = BuildTrace.failedStep
       ? `\nFALHOU EM: ${BuildTrace.failedStep}\n${BuildTrace.error ? BuildTrace.error.constructor.name + ': ' + BuildTrace.error.message : ''}`
