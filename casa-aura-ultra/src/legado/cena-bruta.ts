@@ -1425,14 +1425,23 @@ function setLightMode(mode, dur) {
   //
   // Relógio de verdade em vez de contagem de quadros. `dt` limitado a
   // 0,05 s para que uma engasgada não dê um salto na luz.
+  // RELÓGIO DE PAREDE, e não acumulação de deltas.
+  //
+  // A primeira correção trocou o passo fixo por `dt` acumulado com teto de
+  // 0,05 s. Melhor que contar quadros, mas ainda errado abaixo de 20 fps:
+  // com o teto, cada quadro contribui no máximo 0,05 s de "tempo", então a
+  // 10 fps a transição de 1,8 s leva 3,6 s — exatamente o sintoma que ela
+  // dizia ter consertado.
+  //
+  // Tempo decorrido de verdade não tem esse problema e não precisa de
+  // teto. Uma engasgada faz `e` saltar, e isso é o CERTO: depois de travar
+  // dois segundos, a luz deve estar dois segundos mais adiante, não dois
+  // segundos atrasada.
+  const inicio = performance.now();
   let e = 0;
-  let anterior = performance.now();
   const tick = () => {
     if (myId !== solarAnimId) return; // outra transição assumiu
-    const agora = performance.now();
-    const dt = Math.min((agora - anterior) / 1000, 0.05);
-    anterior = agora;
-    e += dt / dur;
+    e = (performance.now() - inicio) / (dur * 1000);
     if (e > 1) e = 1;
     const k = e < 0.5 ? 4 * e * e * e : 1 - Math.pow(-2 * e + 2, 3) / 2;
     applySolarTime(_lerp(from, target, k));
