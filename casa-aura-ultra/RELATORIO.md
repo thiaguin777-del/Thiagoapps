@@ -532,6 +532,77 @@ preciso é a magnitude absoluta):
 E, sobretudo, a treliça em losango **desapareceu da imagem** — que é o
 defeito que se estava perseguindo.
 
+### 10. O que a revisão de código encontrou — e o pior era meu
+
+Rodei `/code-review` sobre os dez commits da sessão. Onze achados. O
+primeiro invalida uma coisa que eu havia declarado verificada:
+
+**A junta de sombra nunca renderizou.**
+
+    piso:   box(13,9 / 0,12 / 12) em y = 0,06   ->  topo em 0,12
+    junta:  altura 0,04 em y = 0,09             ->  de 0,07 a 0,11
+
+Inteiramente dentro da laje. Não apareceu em quadro nenhum — e eu tinha
+olhado a captura, visto a sombra do encontro parede/piso e lido como
+sendo a peça. **A sombra sempre esteve lá; a peça não.** Vi o que
+esperava ver, que é exatamente o modo de falha que este relatório
+persegue desde a primeira página.
+
+A correção veio com prova que não é visual: sondando o grafo, a caixa da
+junta agora vai de **y 0,120 a 0,160**, acima do topo do piso — e é uma
+malha só, porque a fusão por material juntou as sete corridas.
+
+**E a sanca saiu inteira.** A revisão mostrou que eu havia construído um
+sistema paralelo ao `createCoveLight`, que já existia — e pior:
+
+| o que eu fiz | por que estava errado |
+|---|---|
+| `matLed` sem `envMapIntensity` | a fita de `createCoveLight` fixa `0` com o comentário *"era isso que a deixava branca de dia"*. Reproduzi um defeito já consertado |
+| sanca da suíte em z −5,99…−5,87 | **engolia** o `headCove` em (6,5 / 3,02 / −5,86): a fita parava de brilhar com a testeira ainda aparecendo |
+| sanca na parede norte da sala | ficava paralela à `cove` que já existia em z −5,7 — duas fitas na mesma parede |
+| sanca em y 3,06 na partição | a partição tem **3,0 m**, não 3,2: a peça flutuava acima do topo dela |
+
+Agora: paredes que já tinham cove ganham só a junta; as que não tinham
+ganham cove **pela função existente**, na mesma altura das demais (3,02).
+Duas alturas de rasgo na mesma casa leem como erro de obra.
+
+Os demais achados corrigidos:
+
+- **`chapterCamMove` não caía no caminho de corte.** Voo seguido de corte
+  deixava a flag ligada, e o `lerpCam()` seguia perseguindo a câmera
+  através da fachada durante o fade, com o `clampFreeCamera()` isento.
+- **O voo de capítulo não desligava o orbit**, mas a chegada religava — o
+  amortecimento do `OrbitControls` disputava a câmera com o `lerpCam()`
+  no percurso inteiro. `toggleReveal()` já desligava, pelo mesmo motivo.
+- **O costurador do HTML único embutia o bundle como *string* de
+  substituição.** Em `String.replace`, `$&`, `` $` ``, `$'` e `$$` são
+  padrões: um cifrão perdido em 1,3 MB de three.js reinjetaria o trecho
+  casado e truncaria o script num `SyntaxError` — com a conferência de
+  referência absoluta passando do mesmo jeito. Latente, mas latente não é
+  inexistente. Agora entra por função de substituição.
+- **O painel de debug tinha `/11 etapas` escrito à mão** e passou a
+  mostrar "12/11" assim que uma etapa foi acrescentada. Agora conta do
+  próprio array.
+- **A bancada do gramado usava `opts: {}` como controle "ATUAL"** — ou
+  seja, media a configuração que a cena já não envia. Uma bancada cujo
+  controle não é o código mede outra coisa.
+
+### A transição de luz, em três versões
+
+Vale isolado porque é o mesmo defeito reaparecendo três vezes, cada uma
+sobrevivendo a uma correção:
+
+| versão | fórmula | por que ainda estava errada |
+|---|---|---|
+| v1 | `e += 0.016 / dur` | 60 fps cravados no código |
+| v2 | `e += min(dt, 0.05) / dur` | o teto prende ao quadro abaixo de 20 fps: a 10 fps, 1,8 s vira 3,6 s |
+| **v3** | `e = (agora − início) / dur` | relógio de parede, sem teto |
+
+O teto da v2 parecia prudência — impedir que uma engasgada desse um salto
+na luz. Mas depois de travar dois segundos, a luz **deve** estar dois
+segundos adiante, não dois atrasada. O salto era o comportamento certo, e
+eu o tinha tratado como defeito.
+
 ### Erro meu de leitura, registrado para não voltar
 
 - **Erro meu de leitura, registrado para não voltar:** capturei a piscina
@@ -820,10 +891,13 @@ Classificação exigida: DONE / PARCIAL / BLOQUEADO / NÃO MEDIDO. Um item só
 | Núcleo em pedra lendo como bloco | **DONE** | ablação: a junta sozinha causava a leitura; 3 → 10 fiadas troca alvenaria por estratificação |
 | Trama regular no gramado | **DONE** | não era o normal map: eram as manchas do ladrilho difuso; 0,2556 → 0,2080 e a treliça sumiu |
 | Determinismo da cena | **DONE** | duas cargas com soma das 5002 matrizes de instância idêntica (171347,886) |
-| Rodapés além das duas paredes norte | **PARCIAL** | não sei onde estão as aberturas e não vou chutar |
+| Acabamento interno (junta de sombra) | **DONE** | as sete corridas seguem as paredes de `buildArchitecture`; caixa provada em y 0,120–0,160, acima do piso em 0,12 |
+| Cove nas paredes que não tinham | **DONE** | pela `createCoveLight` existente, em 3,02 — sem sistema paralelo |
+| Estouro do interior noturno | **PARCIAL** | bloom por local: 41,3% → 27,6% da parede acima de 240. O resíduo é luz direta das 9 luminárias e só zera desligando-as |
+| Fachada, paisagismo e interface (blocos 2–4) | **NÃO INICIADO** | o acabamento pedido cobre quatro áreas; só a primeira foi feita |
 | Desempenho (FPS, tempo de quadro) | **NÃO MEDIDO** | esta máquina não tem GPU |
 | Galeria 360° | **BLOQUEADO** | não há panorama nenhum no repositório |
-| Supabase | **BLOQUEADO** | criar o projeto é ação cobrada, na conta do Thiago |
+| Supabase | **BLOQUEADO** | conta consultada pelo conector: **zero projetos**. Criar é ação cobrada, na conta do Thiago |
 | KTX2, PMREM assado, BatchedMesh, BVH, SSR, TAA, LOD de vegetação, lightmaps, culling por portais | **NÃO INICIADO** | escopo original, nunca começado |
 
 **O que isto NÃO é.** Não é "o prompt implementado". Seis defeitos foram
