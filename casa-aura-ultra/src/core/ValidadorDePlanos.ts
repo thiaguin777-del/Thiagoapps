@@ -81,6 +81,72 @@ const COBERTURA_MINIMA = 0.08;
 
 const _dummy = new THREE.Object3D();
 
+/**
+ * O QUE CONTA COMO "A CASA".
+ *
+ * `houseGroup` não é só o edifício: `buildGround()` pendura nele o
+ * gramado de 130 m, o campo de fundo de 900 m com 18 mil triângulos e os
+ * canteiros. Se tudo isso contasse, um plano apontado para o jardim
+ * mediria 100% de "casa" — o defeito que este módulo existe para pegar
+ * passaria batido — e cada raio ainda teria de atravessar o terreno
+ * inteiro, que é o que travava o boot na primeira versão deste arquivo.
+ *
+ * Casa é o que cabe DENTRO do envelope construído, com folga de 2 m para
+ * beirais e brises. É o mesmo envelope que a navegação já usa.
+ */
+export function malhasDeEdificio(
+  raiz: THREE.Object3D,
+  dentroDoEnvelope: (p: THREE.Vector3, folga?: number) => boolean,
+): THREE.Mesh[] {
+  const centro = new THREE.Vector3();
+  const tamanho = new THREE.Vector3();
+  const caixa = new THREE.Box3();
+  const out: THREE.Mesh[] = [];
+  raiz.traverse((o) => {
+    const m = o as THREE.Mesh;
+    if (!m.isMesh || !o.visible) return;
+    caixa.setFromObject(m, true);
+    if (!isFinite(caixa.min.x)) return;
+    caixa.getCenter(centro);
+    caixa.getSize(tamanho);
+    if (tamanho.x > 40 || tamanho.z > 40 || !dentroDoEnvelope(centro, 2.0)) return;
+    out.push(m);
+  });
+  return out;
+}
+
+/**
+ * Enquadramento da câmera COMO ELA ESTÁ AGORA. É a mesma medida que
+ * `validarPlanos` faz por pose, só que sobre a câmera viva — o que
+ * permite auditar o Modo Apresentação enquanto ele roda de verdade, pelo
+ * botão, em vez de sobre coordenadas lidas de um arquivo.
+ */
+export function medirEnquadramento(
+  cam: THREE.PerspectiveCamera,
+  alvos: THREE.Mesh[],
+): { cobertura: number; centroNaCasa: boolean; distanciaCentro: number | null } {
+  const raio = new THREE.Raycaster();
+  raio.far = 400;
+  const ndc = new THREE.Vector2();
+  cam.updateMatrixWorld(true);
+  let acertos = 0;
+  for (let gy = 0; gy < GRADE; gy++) {
+    for (let gx = 0; gx < GRADE; gx++) {
+      ndc.set((gx + 0.5) / GRADE * 2 - 1, (gy + 0.5) / GRADE * 2 - 1);
+      raio.setFromCamera(ndc, cam);
+      if (raio.intersectObjects(alvos, false).length > 0) acertos++;
+    }
+  }
+  ndc.set(0, 0);
+  raio.setFromCamera(ndc, cam);
+  const centro = raio.intersectObjects(alvos, false);
+  return {
+    cobertura: +(acertos / (GRADE * GRADE)).toFixed(3),
+    centroNaCasa: centro.length > 0,
+    distanciaCentro: centro.length > 0 ? +centro[0].distance.toFixed(2) : null,
+  };
+}
+
 export function validarPlanos(
   planos: PoseDePlano[],
   casa: THREE.Object3D,
@@ -90,45 +156,12 @@ export function validarPlanos(
   const raio = new THREE.Raycaster();
   raio.far = 400;
 
-  // ------------------------------------------------------------
-  // O QUE CONTA COMO "A CASA"
-  //
-  // `houseGroup` não é só o edifício: `buildGround()` pendura nele o
-  // gramado de 130 m, o campo de fundo de 900 m com 18 mil triângulos e
-  // os canteiros. Se tudo isso contasse, um plano apontado para o
-  // jardim mediria 100% de "casa" — o defeito que este módulo existe
-  // para pegar passaria batido — e cada raio ainda teria de atravessar
-  // o terreno inteiro, que é o que travava o boot.
-  //
-  // Casa é o que cabe DENTRO do envelope construído, com folga de 2 m
-  // para beirais e brises. É o mesmo envelope que a navegação usa.
-  // ------------------------------------------------------------
-  const FOLGA = 2.0;
-  const centro = new THREE.Vector3();
-  const tamanho = new THREE.Vector3();
-  const caixaTmp = new THREE.Box3();
-  const alvos: THREE.Mesh[] = [];
-  let descartadas = 0;
-  casa.traverse((o) => {
-    const m = o as THREE.Mesh;
-    if (!m.isMesh || !o.visible) return;
-    caixaTmp.setFromObject(m, true);
-    if (!isFinite(caixaTmp.min.x)) return;
-    caixaTmp.getCenter(centro);
-    caixaTmp.getSize(tamanho);
-    // Grande demais para ser peça de edifício, ou com o centro fora do
-    // envelope: é sítio, não casa.
-    if (tamanho.x > 40 || tamanho.z > 40 || !dentroDoEnvelope(centro, FOLGA)) {
-      descartadas++;
-      return;
-    }
-    alvos.push(m);
-  });
+  const alvos = malhasDeEdificio(casa, dentroDoEnvelope);
   if (alvos.length === 0) {
     return planos.map((p, i) => ({
       indice: i, titulo: p.titulo ?? `plano ${i}`, poses: [],
       atravessaFachada: false,
-      problemas: [`nenhuma malha de edifício encontrada (${descartadas} descartadas como sítio)`],
+      problemas: ['nenhuma malha de edifício encontrada'],
     }));
   }
 
@@ -139,7 +172,6 @@ export function validarPlanos(
     const b = new THREE.Box3().setFromObject(m, true);
     return { nome: m.name || m.geometry.type, b };
   }).filter((c) => isFinite(c.b.min.x));
-  void descartadas;
 
   const cam = camModelo.clone();
   const laudos: LaudoDePlano[] = [];

@@ -6485,13 +6485,78 @@ function buildGround() {
   // continua plano, como lote implantado realmente é, e o relevo começa
   // além dele. 96x96 segmentos = ~18 mil triângulos num único draw call.
   g.add(farGroundMesh(900, 96));
-  // Gramado do lote: disco de 130 m com a textura detalhada, por cima do
-  // campo distante. A emenda entre os dois cai onde o relevo ainda é
-  // zero, então não há degrau — e a diferença de tom é a mesma variação
-  // que o gramado já tem.
-  const lote = new THREE.Mesh(new THREE.CircleGeometry(130, 48), M.gramado);
+  // ------------------------------------------------------------
+  // O GRAMADO DO LOTE SEGUE O RELEVO — e por que isto era um defeito
+  // grave, e não um detalhe.
+  //
+  // MEDIDO (detector de z-fighting no nível do triângulo, mais avaliação
+  // numérica de `farGroundHeight` sobre o disco):
+  //
+  //   relevo do campo distante dentro de r <= 130 m:
+  //     mínimo -2,329 m   máximo +8,556 m   AMPLITUDE 10,886 m
+  //
+  // O disco era um PLANO em y = -0,06 com raio de 130 m. O campo
+  // distante embaixo dele sobe até 8,5 m e desce até 2,3 m dentro desse
+  // mesmo raio, porque a rampa de relevo começa em 42 m — muito antes da
+  // borda do disco. Ou seja: de 42 m para fora o terreno ATRAVESSA o
+  // gramado. Onde o terreno está por cima, o gramado some; onde está por
+  // baixo, o gramado flutua; e ao longo de toda a curva de interseção as
+  // duas superfícies opacas, ambas voltadas para cima, disputam o mesmo
+  // pixel — e a disputa muda de vencedor quando a câmera anda.
+  //
+  // Isso ocupa a faixa média de TODA vista externa. É a causa raiz da
+  // família de sintoma que o cliente descreveu como "não fica parado".
+  // O comentário original dizia que a emenda funcionava porque "o relevo
+  // ainda é zero" ali — isso é verdade em 42 m, não em 130.
+  //
+  // CORREÇÃO: o disco passa a ser deslocado pelo MESMO campo de altura
+  // do terreno, com uma folga vertical por cima. Não é achatar o relevo
+  // (que é uma decisão de projeto conquistada: "gramado liso até o
+  // horizonte faz a casa parecer objeto sobre uma mesa") nem encolher o
+  // disco: é fazer as duas superfícies concordarem.
+  //
+  // A FOLGA, dimensionada e não chutada. O campo distante é uma malha de
+  // 96 segmentos (9,375 m por quadro): a superfície dele é a
+  // interpolação linear de `farGroundHeight`, não a função. Medido por
+  // faixa de raio, a malha chega a ficar 55 mm ACIMA da função (em
+  // 42-50 m, onde a curvatura da rampa é máxima). Somando o erro da
+  // própria triangulação polar do disco (~26 mm), a folga precisa passar
+  // de 81 mm para o disco nunca afundar. 120 mm dá 39 mm de sobra — e a
+  // resolução do buffer de 24 bits a 130 m é 10,1 mm, ou seja 3,9x de
+  // margem contra z-fighting.
+  //
+  // A folga é RAMPADA de 20 mm (o valor de hoje, que mantém o gramado
+  // abaixo do travertino em -0,015) até 120 mm, entre 25 m e 40 m do
+  // centro. Todo o piso duro — terraços, caminho, cascalho, canteiros,
+  // garagem — está dentro de r ~ 20 m, então nada disso é afetado; e a
+  // rampa termina antes dos 42 m onde o relevo começa.
+  //
+  // RingGeometry em vez de CircleGeometry porque a segunda não tem
+  // segmentos radiais: um disco de 48 triângulos não consegue seguir
+  // relevo nenhum. A UV é a mesma nas duas (`(x/raio + 1)/2` em ambas),
+  // então a escala da textura não muda. O furo de 0,75 m no centro fica
+  // sob a laje do piso social e nunca é visto.
+  // ------------------------------------------------------------
+  const LOTE_R = 130;
+  const loteGeo = new THREE.RingGeometry(0.75, LOTE_R, 128, 32);
+  {
+    const pos = loteGeo.attributes.position;
+    for (let i = 0; i < pos.count; i++) {
+      const x = pos.getX(i), y = pos.getY(i);
+      const d = Math.hypot(x, y);
+      // mesma suavização (smoothstep) que a rampa do terreno usa
+      const t = Math.max(0, Math.min(1, (d - 25) / 15));
+      const folga = 0.02 + 0.10 * (t * t * (3 - 2 * t));
+      pos.setZ(i, farGroundHeight(x, y + 4) + folga);
+    }
+    loteGeo.computeVertexNormals();
+  }
+  const lote = new THREE.Mesh(loteGeo, M.gramado);
   lote.rotation.x = -Math.PI / 2;
-  lote.position.set(0, -0.06, 4);
+  // Mesma base que o campo distante: a folga inteira vive no
+  // deslocamento, então a distância entre as duas superfícies é
+  // exatamente `folga` em qualquer ponto.
+  lote.position.set(0, -0.08, 4);
   lote.receiveShadow = true;
   lote.userData.noMerge = true;
   g.add(lote);

@@ -208,12 +208,26 @@ async function principal(): Promise<void> {
   // ------------------------------------------------------------
   if (new URLSearchParams(location.search).get('validar') === '1') {
     try {
-      const { validarPlanos } = await import('./core/ValidadorDePlanos');
+      const { validarPlanos, malhasDeEdificio, medirEnquadramento } =
+        await import('./core/ValidadorDePlanos');
       const casa = cena.houseGroup ?? cena.scene;
       const laudos = validarPlanos(
         apresentacao.roteiro, casa, cena.camera, cena.pointInEnvelope!,
       );
-      (window as unknown as { __auraValidacao?: unknown }).__auraValidacao = laudos;
+      const w = window as unknown as {
+        __auraValidacao?: unknown; __auraMedirEnquadramento?: unknown;
+      };
+      w.__auraValidacao = laudos;
+      // A MESMA medida, sobre a câmera VIVA. É o que permite auditar a
+      // apresentação rodando pelo botão de verdade — coordenadas num
+      // arquivo provam o roteiro, não provam o modo.
+      const malhas = malhasDeEdificio(casa, cena.pointInEnvelope!);
+      w.__auraMedirEnquadramento = () => ({
+        ...medirEnquadramento(cena.camera, malhas),
+        malhasDeEdificio: malhas.length,
+        pos: cena.camera.position.toArray().map((v: number) => +v.toFixed(2)),
+        fov: +cena.camera.fov.toFixed(2),
+      });
       const ruins = laudos.filter((l) => l.problemas.length > 0);
       console.info(`[validador] ${laudos.length} planos, ${ruins.length} com problema`);
       for (const l of ruins) console.warn(`[validador] ${l.indice} ${l.titulo}:`, l.problemas);
