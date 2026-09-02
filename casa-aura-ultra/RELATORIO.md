@@ -1002,3 +1002,147 @@ Vale registrar, porque foi caro descobrir:
    uma cena cheia de pontos ao anoitecer. São 5 luminárias. O teto que
    escolhi não cortava nada — o módulo nasceu inerte e só um `console.info`
    com a contagem real revelou isso.
+
+---
+
+# 12. RODADA P0 — CINTILAÇÃO, TEMPO DE QUADRO, CÂMERA, APRESENTAÇÃO
+
+Esta seção cobre a rodada de finalização, dirigida aos quatro
+bloqueadores declarados: cintilação visível, estabilidade de tempo de
+quadro, estabilidade de câmera e Modo Apresentação.
+
+Todo número abaixo é medido. Esta máquina **não tem GPU** (SwiftShader,
+~0,1 quadro/s), então nenhum FPS é reportado, e o que se mede é
+geometria, estado do pipeline e comportamento de laço — coisas que não
+dependem de rasterização rápida.
+
+## 12.1 A câmera não treme — MEDIDO E DESCARTADO
+
+A primeira hipótese era a mais óbvia: `clampFreeCamera()` reescreve
+`camera.position` todo quadro depois de `controls.update()`, e o
+OrbitControls tem amortecimento. Dois donos do mesmo transform brigando
+produziriam tremor.
+
+`clampFreeCamera`, `pointInEnvelope` e `HOUSE_ENVELOPE` passaram a ser
+exportados justamente para poder exercitar esse laço sem desenhar (aqui
+um quadro custa dez segundos; mil iterações do laço custam
+milissegundos). 240 iterações, quatro cenários:
+
+| cenário | salto máximo | salto médio | período-2 |
+|---|---|---|---|
+| parado, externo | 0,000 mm | 0,000 mm | 0,000 mm |
+| empurrando contra a fachada leste | 0,000 mm | 0,000 mm | 0,000 mm |
+| empurrando abaixo do piso | 0,000 mm | 0,000 mm | 0,000 mm |
+| rasante à fachada norte | 0,000 mm | 0,000 mm | 0,000 mm |
+
+Zero em todos. A hipótese está **descartada com medida**, não com
+opinião.
+
+## 12.2 O pipeline de profundidade está saudável — MEDIDO
+
+A segunda hipótese era precisão de profundidade: `near = 0,1` e
+`far = 500` é razão 5000, e os alvos do composer poderiam ter buffer de
+16 bits (o Three.js só usa `DEPTH_COMPONENT24` em WebGL 2).
+
+Lido em tempo de execução:
+
+    webgl2 ....................... true
+    bits do framebuffer padrão ... 24
+    alvo1 do composer ............ 1280x800, amostras 4, stencil true
+    alvo2 do composer ............ 1280x800, amostras 4, stencil true
+
+Resolução do buffer de 24 bits com este near/far:
+
+| distância | 1 m | 5 m | 20 m | 50 m | 100 m | 200 m |
+|---|---|---|---|---|---|---|
+| resolução | 0,001 mm | 0,015 mm | 0,24 mm | 1,5 mm | 6,0 mm | 23,8 mm |
+
+Dentro da casa a resolução é submilimétrica: só coincidência EXATA
+brigaria. **Mexer em `near`/`far` seria mexer no lugar errado**, e a
+correção do MSAA e do stencil (seção 5) está confirmada aplicada em
+tempo de execução, não só no código.
+
+## 12.3 A causa raiz: o gramado do lote atravessava o relevo por 10,9 m
+
+Detector de z-fighting no nível do triângulo: todo triângulo de toda
+malha opaca em coordenadas de mundo, filtrado para os paralelos a um
+eixo, agrupado por eixo + plano + **sentido da normal**. O sentido é o
+que separa defeito de contato — duas faces no mesmo plano apontando para
+lados opostos são uma peça apoiada na outra, e o back-face culling
+resolve; apontando para o mesmo lado, as duas são desenhadas e o buffer
+escolhe por pixel.
+
+O pior par: disco de gramado do lote contra o campo distante, folga
+0 mm, ambas as faces para cima. Avaliando `farGroundHeight` sobre o raio
+do disco:
+
+    relevo do campo distante dentro de r <= 130 m
+      mínimo -2,329 m   máximo +8,556 m   AMPLITUDE 10,886 m
+
+O disco era um **plano** em y = -0,06 com 130 m de raio, e a rampa de
+relevo do terreno começa em 42 m. De 42 m para fora o terreno
+**atravessa** o gramado. Isso ocupa a faixa média de toda vista externa.
+
+A correção deslocou o disco pelo mesmo campo de altura, com folga
+dimensionada (o campo distante é malha de 96 segmentos, e a superfície
+dele chega a ficar 55 mm acima da função que a define). Prova, amostrando
+dentro dos triângulos do disco novo:
+
+| faixa de raio | folga mínima | margem sobre o buffer |
+|---|---|---|
+| 0–25 m | 20,0 mm | 54x |
+| 25–42 m | 23,0 mm | 22x |
+| 42–70 m | 66,4 mm | 23x |
+| 70–100 m | 90,2 mm | 15x |
+| 100–130 m | 97,5 mm | 10x |
+
+O gramado continua em y = -0,0600 exatos até r = 25 m: nada perto da casa
+se moveu.
+
+## 12.4 A mata e os morros estavam apoiados no ESPELHO do terreno
+
+Achado conferindo a matemática de quem consome `farGroundHeight`.
+`farGroundMesh` é um plano girado -90° em X e posto em z = 4, então o
+vértice de mundo (x, ·, wz) usa `farGroundHeight(x, 8 - wz)`. A vegetação
+distante e os morros chamavam `farGroundHeight(x, z)` com o z de mundo.
+Os dois campos só coincidem em wz = 4.
+
+| anel | erro médio | erro máximo |
+|---|---|---|
+| mata próxima (46–120 m) | 1,97 m | 9,48 m |
+| mata média (120–220 m) | 6,11 m | 14,48 m |
+| mata distante (220–300 m) | 6,19 m | 14,46 m |
+| morros 1 (225–320 m) | 6,17 m | 14,43 m |
+| morros 2 (340–435 m) | 5,44 m | 13,36 m |
+
+Seis metros de erro médio: metade da mata de fundo flutuando, a outra
+metade enterrada, em toda vista externa. Corrigido nos consumidores e não
+na malha — a silhueta do horizonte foi calibrada renderizando, e girá-la
+agora seria trocar um defeito medido por uma regressão não medida.
+
+## 12.5 O teto de tempo da pré-compilação era decorativo
+
+O projeto não tinha nenhuma pré-compilação de shader. A primeira versão
+usou `compileAsync` com corrida contra um relógio de 9 s. Medido:
+
+    58 -> 99 programas em 37 578,9 ms, com teto declarado de 9 000 ms
+
+O teto não segurou nada, e a fonte do Three.js diz por quê:
+`compileAsync` chama `compile()` de forma **síncrona** e só depois
+devolve a Promise que espera o driver. Sem
+`KHR_parallel_shader_compile` o trabalho todo acontece com a thread
+travada, e o `Promise.race` nunca é avaliado. Agora a compilação vai em
+pedaços de 8 objetos, cedendo um quadro entre eles, com orçamento real de
+6 s.
+
+## 12.6 O que ainda não tem número
+
+- **Tempo de quadro em hardware real.** `UNMEASURED — REQUIRES TARGET
+  HARDWARE`. O que existe agora é o instrumento: anel dos últimos 600
+  quadros com p50/p95/p99/pior e contagem de engasgos (quadro acima de 2x
+  a mediana), no console de debug e na telemetria. Média de FPS saiu de
+  cena como métrica principal — ela esconde exatamente o defeito que o
+  cliente relatou.
+- **Inspeção visual das correções.** `UNTESTED`. Nenhuma captura foi
+  feita depois das correções de terreno; o que existe é prova geométrica
+  e numérica.
