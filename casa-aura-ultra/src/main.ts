@@ -98,6 +98,9 @@ async function principal(): Promise<void> {
       M: cena.M, Quality: cena.Quality, houseGroup: cena.houseGroup,
       lampLights: cena.lampLights,
       sunLight: cena.sunLight, solarTime: cena.solarTime,
+      transitionNeedsCut: cena.transitionNeedsCut,
+      doFadeCut: cena.doFadeCut,
+      pointInEnvelope: cena.pointInEnvelope,
     });
   } catch (e) {
     // Um efeito que falha não pode derrubar a visita. A casa vale mais
@@ -118,6 +121,53 @@ async function principal(): Promise<void> {
   window.addEventListener('resize', () => {
     cenaAura.redimensionar(window.innerWidth, window.innerHeight);
   });
+
+  // ------------------------------------------------------------
+  // PRÉ-COMPILAÇÃO DE SHADER — contra o engasgo, não contra o FPS médio
+  //
+  // No Three.js o programa de um material só é compilado quando aquele
+  // material aparece pela PRIMEIRA vez num quadro. O projeto não tinha
+  // nenhuma pré-compilação: cada material novo que entrava em quadro
+  // parava a thread principal enquanto o driver compilava, e isso
+  // acontece exatamente quando a câmera começa a girar — ou seja, no
+  // primeiro movimento do Modo Apresentação, com o corretor olhando.
+  //
+  // Isso não aparece em média de FPS nenhuma. Aparece como travadinha, e
+  // travadinha é o defeito que o cliente relatou.
+  //
+  // `compileAsync` usa KHR_parallel_shader_compile quando o driver tem, e
+  // cai para compilação síncrona quando não tem — nos dois casos aqui, na
+  // tela de carregamento, que é onde uma espera é esperada.
+  //
+  // Com corrida contra um teto de tempo: num aparelho fraco a compilação
+  // inteira pode passar de dez segundos, e travar o carregamento seria
+  // trocar um defeito por outro pior. O que não compilar aqui compila
+  // no caminho, como antes — nunca fica pior que o estado anterior.
+  // ------------------------------------------------------------
+  try {
+    const r = cena.renderer as {
+      info: { programs?: unknown[] };
+      compile: (s: unknown, c: unknown) => void;
+      compileAsync?: (s: unknown, c: unknown) => Promise<unknown>;
+    };
+    const antes = r.info.programs?.length ?? 0;
+    const t0 = performance.now();
+    if (typeof r.compileAsync === 'function') {
+      await Promise.race([
+        r.compileAsync(cena.scene, cena.camera),
+        new Promise((res) => setTimeout(res, 9000)),
+      ]);
+    } else {
+      r.compile(cena.scene, cena.camera);
+    }
+    const depois = r.info.programs?.length ?? 0;
+    console.info(`[preaquecimento] ${antes} -> ${depois} programas em `
+      + `${(performance.now() - t0).toFixed(0)} ms`);
+    (window as unknown as { __auraPreaquecimento?: unknown }).__auraPreaquecimento =
+      { antes, depois, ms: +(performance.now() - t0).toFixed(1) };
+  } catch (e) {
+    console.warn('Casa Aura: pré-compilação falhou, seguindo sem ela', e);
+  }
 
   // A cena subiu: sai de LOADING. O hero já está no DOM desde o começo —
   // o fade só descobre o que já existe.
@@ -141,6 +191,36 @@ async function principal(): Promise<void> {
   // filme: a última coisa que o cliente vê é o convite.
   const { apresentacao } = await import('./ui/Presentation');
   apresentacao.montar(fsm, cena);
+
+  // ------------------------------------------------------------
+  // VALIDAÇÃO GEOMÉTRICA DO ROTEIRO — `?validar=1`
+  //
+  // O cliente relatou que a apresentação podia mostrar paisagem em vez
+  // da casa. As causas mecânicas foram corrigidas no CameraDirector, mas
+  // "corrigi a mecânica" não é o mesmo que "os oito enquadramentos estão
+  // certos". Isto mede, lançando raios contra a geometria que está na
+  // cena: quanto do quadro é casa, se o centro do quadro encontra a
+  // casa, se a câmera está dentro de algum sólido, e se partida e
+  // chegada estão do mesmo lado da fachada.
+  //
+  // Fora da flag o módulo nem é baixado: `import()` dinâmico dentro do
+  // `if`. Custo zero em produção.
+  // ------------------------------------------------------------
+  if (new URLSearchParams(location.search).get('validar') === '1') {
+    try {
+      const { validarPlanos } = await import('./core/ValidadorDePlanos');
+      const casa = cena.houseGroup ?? cena.scene;
+      const laudos = validarPlanos(
+        apresentacao.roteiro, casa, cena.camera, cena.pointInEnvelope!,
+      );
+      (window as unknown as { __auraValidacao?: unknown }).__auraValidacao = laudos;
+      const ruins = laudos.filter((l) => l.problemas.length > 0);
+      console.info(`[validador] ${laudos.length} planos, ${ruins.length} com problema`);
+      for (const l of ruins) console.warn(`[validador] ${l.indice} ${l.titulo}:`, l.problemas);
+    } catch (e) {
+      console.error('[validador] falhou', e);
+    }
+  }
 
   // `await` + try/catch, e não `iniciar()` solto, por dois motivos:
   //

@@ -253,6 +253,7 @@ function enviarTelemetria() {
   TELEMETRIA.enviado = true;
   let mem = null, nucleos = null;
   try { mem = navigator.deviceMemory || null; nucleos = navigator.hardwareConcurrency || null; } catch (e) {}
+  const _pc = Perf.percentis();   // uma ordenacao so, nao cinco
   const corpo = JSON.stringify([{
     sessao: (crypto.randomUUID ? crypto.randomUUID() : String(Date.now())),
     slug: TELEMETRIA.slug,
@@ -260,6 +261,15 @@ function enviarTelemetria() {
     fps_medio: Perf.frameMs ? +(1000 / Perf.frameMs).toFixed(1) : null,
     fps_p05: Perf.piorFps || null,
     quadro_ms: Perf.frameMs ? +Perf.frameMs.toFixed(2) : null,
+    // A media era o unico numero de desempenho que saia daqui, e media
+    // nao denuncia engasgo. Estes quatro sao o que permite saber, do
+    // aparelho do cliente, se a experiencia foi FLUIDA — e nao apenas se
+    // ela foi rapida em media.
+    quadro_p50: _pc ? _pc.p50 : null,
+    quadro_p95: _pc ? _pc.p95 : null,
+    quadro_p99: _pc ? _pc.p99 : null,
+    quadro_pior: _pc ? _pc.pior : null,
+    engasgos: Perf.engasgos,
     draw_calls: renderer ? renderer.info.render.calls : null,
     programas: renderer ? renderer.info.programs.length : null,
     ms_ate_pronto: Perf.bootMs ? Math.round(Perf.bootMs) : null,
@@ -3501,28 +3511,61 @@ function buildMaterials() {
   };
   Object.keys(respostaAoAmbiente).forEach(k => { if (M[k]) M[k].envMapIntensity = respostaAoAmbiente[k]; });
 
-  // Sem anisotropia, uma textura repetida 450x vira ruído cintilante em
-  // ângulo rasante — que é exatamente como se olha um gramado.
+  // ------------------------------------------------------------
+  // ANISOTROPIA EM TODA TEXTURA — e por que a lista à mão saiu daqui
+  //
+  // Sem anisotropia, uma textura repetida 450x vira ruído CINTILANTE em
+  // ângulo rasante — que é exatamente como se olha um gramado, um deck
+  // ou uma cobertura. O diagnóstico estava certo desde sempre; o que
+  // estava errado era a forma de aplicá-lo.
+  //
+  // Aqui havia uma lista à mão de 33 mapas. Uma lista dessas só pode
+  // envelhecer: todo material novo, e todo slot novo de um material
+  // existente, nasce fora dela e nasce cintilando. O próprio arquivo
+  // registra um caso — `manta` e `grafite` foram encontrados FALTANDO na
+  // lista, renderizando, depois de a cobertura já ter sido refeita.
+  // Ficaram dois mapas de cobertura de fora por uma sessão inteira.
+  //
+  // O cliente relata paredes e móveis que "cintilam e não param quietos
+  // enquanto navego". Cintilação de textura em movimento é uma das
+  // causas dessa família de sintoma, e uma lista incompleta é a forma
+  // mais fácil de deixá-la ligada em metade da casa sem perceber.
+  //
+  // Agora a varredura é sobre TODOS os materiais de `M` e TODOS os slots
+  // de textura de cada um. Não pode ficar desatualizada, e o custo é uma
+  // varredura de algumas centenas de campos, uma vez, no boot.
+  //
+  // `envMap` fica de fora de propósito: é o PMREM do céu, não é uma
+  // textura de superfície, e anisotropia nele não tem significado.
+  // ------------------------------------------------------------
   const aniso = (renderer && renderer.capabilities)
     ? Math.min(8, renderer.capabilities.getMaxAnisotropy()) : 1;
-  // Inclui os mapas PBR derivados: eles substituíram os objetos de
-  // textura originais, então precisam receber anisotropia também.
-  [M.gramado.map, M.gramado.normalMap, M.campoDistante.map,
-   M.terraco.map, M.caminho.map, M.cascalho.map,
-   M.travertino.map, M.travertino.normalMap, M.travertino.roughnessMap, M.travertino.aoMap,
-   M.estuque.map, M.estuque.normalMap, M.estuque.roughnessMap, M.estuque.aoMap,
-   M.concreto.map, M.concreto.normalMap, M.concreto.roughnessMap, M.concreto.aoMap,
-   M.stoneCore.map, M.stoneCore.normalMap, M.stoneCore.roughnessMap, M.stoneCore.aoMap,
-   M.madeiraClara.map, M.madeiraClara.normalMap, M.madeiraClara.roughnessMap, M.madeiraClara.aoMap,
-   M.cumaru.map, M.cumaru.normalMap, M.cumaru.roughnessMap, M.cumaru.aoMap,
-   M.ipe.map, M.ipe.normalMap, M.ipe.roughnessMap, M.ipe.aoMap,
-   // A cobertura é quase sempre vista em ângulo rasante (a câmera fica
-   // abaixo dela em toda vista de fachada). Sem anisotropia a manta vira
-   // uma faixa cinza borrada exatamente onde ela tem mais área na tela —
-   // era o caso: nenhum dos dois mapas estava nesta lista.
-   M.manta.map, M.manta.normalMap,
-   M.grafite.map, M.grafite.normalMap]
-    .forEach(t => { if (t) t.anisotropy = aniso; });
+  const SLOTS = [
+    'map', 'normalMap', 'roughnessMap', 'metalnessMap', 'aoMap', 'emissiveMap',
+    'alphaMap', 'bumpMap', 'displacementMap', 'lightMap', 'specularMap',
+    'clearcoatMap', 'clearcoatNormalMap', 'clearcoatRoughnessMap',
+    'sheenColorMap', 'sheenRoughnessMap', 'specularIntensityMap',
+    'specularColorMap', 'transmissionMap', 'thicknessMap',
+    'iridescenceMap', 'iridescenceThicknessMap', 'anisotropyMap',
+  ];
+  let _anisoN = 0;
+  const _vistas = new Set();
+  Object.keys(M).forEach((k) => {
+    const mat = M[k];
+    if (!mat) return;
+    for (const slot of SLOTS) {
+      const t = mat[slot];
+      // Um mesmo objeto de textura é compartilhado por vários materiais;
+      // atribuir duas vezes não quebra nada, mas a contagem mentiria.
+      if (!t || !t.isTexture || _vistas.has(t)) continue;
+      _vistas.add(t);
+      t.anisotropy = aniso;
+      t.needsUpdate = true;
+      _anisoN++;
+    }
+  });
+  if (DEBUG) console.info('[textura] anisotropia ' + aniso + 'x em ' + _anisoN + ' mapas');
+  Perf.texturasComAnisotropia = _anisoN;
 
   glassMaterial = M.vidro;
   waterMaterial = M.agua;
@@ -3583,6 +3626,31 @@ const Perf = {
   quadros: 0,
   piorFps: null,   // o percentil baixo dói mais que a média
   porTextura: [],   // [rotulo, ms] de cada geracao
+  texturasComAnisotropia: 0,   // quantos mapas receberam filtro anisotropico
+  // ------------------------------------------------------------
+  // TEMPO DE QUADRO, NAO FPS MEDIO
+  //
+  // FPS medio esconde exatamente o defeito que importa. Uma sessao a 60
+  // fps medio com um quadro de 90 ms a cada dois segundos LE COMO
+  // TRAVADA, e a media nao muda. O que o olho percebe e a VARIACAO.
+  //
+  // Anel dos ultimos 600 quadros (~10 s a 60 Hz). Dele saem p50, p95,
+  // p99 e a contagem de engasgos — quadro acima de 2x a mediana. Custo:
+  // uma escrita em array por quadro, sem alocacao.
+  // ------------------------------------------------------------
+  anel: new Float32Array(600),
+  anelN: 0,
+  engasgos: 0,      // quadros acima de 2x a mediana corrente
+  medianaMs: 0,     // mediana corrente, recalculada a cada 60 quadros
+  /** p50/p95/p99/pior sobre o anel. Chamada sob demanda, nao por quadro. */
+  percentis() {
+    const n = Math.min(this.anelN, this.anel.length);
+    if (n < 30) return null;
+    const v = Array.prototype.slice.call(this.anel, 0, n).sort((a, b) => a - b);
+    const q = (f) => +v[Math.min(n - 1, Math.floor(f * n))].toFixed(2);
+    return { n, p50: q(0.50), p95: q(0.95), p99: q(0.99), pior: +v[n - 1].toFixed(2),
+             engasgos: this.engasgos };
+  },
 };
 const _geoCache = new Map();
 // ============================================================
@@ -7645,11 +7713,28 @@ function animate() {
   const now = performance.now();
   // Média móvel do tempo de quadro. Serve ao painel de debug e ao
   // rebaixamento — os dois lendo a MESMA fonte, para não divergirem.
+  const msDoQuadro = now - _tQuadroAnterior;
   Perf.frameMs = Perf.frameMs
-    ? Perf.frameMs * 0.9 + (now - _tQuadroAnterior) * 0.1
-    : (now - _tQuadroAnterior);
+    ? Perf.frameMs * 0.9 + msDoQuadro * 0.1
+    : msDoQuadro;
   _tQuadroAnterior = now;
   Perf.quadros++;
+
+  // Anel de tempo de quadro. Os 60 primeiros quadros ficam de fora: ali
+  // ainda ha compilacao e upload, e contar isso como engasgo de
+  // navegacao seria medir o boot e chamar de gagueira.
+  if (Perf.quadros > 60) {
+    Perf.anel[Perf.anelN % Perf.anel.length] = msDoQuadro;
+    Perf.anelN++;
+    if (Perf.medianaMs > 0 && msDoQuadro > Perf.medianaMs * 2) Perf.engasgos++;
+    // Mediana recalculada de 60 em 60 quadros: e o limiar de engasgo, e
+    // recalcular por quadro custaria uma ordenacao a 60 Hz.
+    if (Perf.anelN % 60 === 0) {
+      const n = Math.min(Perf.anelN, Perf.anel.length);
+      const v = Array.prototype.slice.call(Perf.anel, 0, n).sort((a, b) => a - b);
+      Perf.medianaMs = v[n >> 1];
+    }
+  }
 
   if (now - lastFrameTime >= 1000) {
     currentFPS = Math.round((frameCount * 1000) / (now - lastFrameTime));
@@ -7658,7 +7743,10 @@ function animate() {
       Perf.piorFps = (Perf.piorFps === null) ? currentFPS : Math.min(Perf.piorFps, currentFPS);
     }
     if (DEBUG && Perf.quadros > 60) {
+      const pc = Perf.percentis();
       console.info('[perf] ' + currentFPS + ' fps | quadro ' + Perf.frameMs.toFixed(1) + ' ms | '
+        + (pc ? 'p50 ' + pc.p50 + ' p95 ' + pc.p95 + ' p99 ' + pc.p99
+               + ' pior ' + pc.pior + ' engasgos ' + pc.engasgos + ' | ' : '')
         + renderer.info.render.calls + ' draw | ' + renderer.info.programs.length + ' programas');
     }
     // ------------------------------------------------------------
@@ -7742,6 +7830,36 @@ export { init, showFallback, Experience, Quality, Perf, CONFIG, goToChapter,
          scene, camera, renderer, controls, composer, M, LP,
          solarTime, currentFPS, lampLights, houseGroup,
          waterObj, sunLight, currentLightMode };
+
+// ------------------------------------------------------------
+// SUPERFICIE DE PROVA DA CAMERA
+//
+// `clampFreeCamera` e `pointInEnvelope` decidem, a cada quadro, se a
+// posicao que o OrbitControls produziu vale. Sao os dois pontos onde um
+// tremor de camera pode nascer, e ate aqui nenhum dos dois podia ser
+// exercitado sem desenhar um quadro — o que nesta maquina custa dez
+// segundos. Expostos, um teste pode rodar mil iteracoes do laco de
+// camera em milissegundos e medir se a posicao converge ou oscila.
+//
+// Nao e enfeite de debug: e a unica forma honesta de afirmar
+// "a camera nao treme" sem GPU.
+// ------------------------------------------------------------
+export { clampFreeCamera, pointInEnvelope, HOUSE_ENVELOPE };
+
+// ------------------------------------------------------------
+// O QUE O LEGADO SABE SOBRE ATRAVESSAR PAREDE
+//
+// `transitionNeedsCut` e `doFadeCut` foram conquistados depurando a
+// navegacao por capitulos: a primeira sabe que um trecho de camera que
+// cruza o envelope tem de virar CORTE, e a segunda faz o corte atras de
+// um fade em vez de teletransportar a vista.
+//
+// O CameraDirector nao sabia nada disso e por isso o Modo Apresentacao
+// voava atravessando a fachada. Em vez de reimplementar o conhecimento
+// (que foi o erro cometido com a sanca e com o rodape), o modulo tipado
+// passa a CONSUMIR estas duas.
+// ------------------------------------------------------------
+export { transitionNeedsCut, doFadeCut, segmentHitsEnvelope };
 export function _cenaPronta() { return !!(scene && renderer); }
 
 // ------------------------------------------------------------

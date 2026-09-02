@@ -67,6 +67,12 @@ interface CenaLegado {
   Quality: { level: string };
   sunLight: THREE.DirectionalLight | null;
   solarTime: number;
+  /** `transitionNeedsCut` do legado — sabe quando a trajetória cruza a casa. */
+  transitionNeedsCut?: (de: THREE.Vector3, para: THREE.Vector3) => boolean;
+  /** `doFadeCut` do legado — corte atrás do fade já calibrado. */
+  doFadeCut?: (aplicar: () => void) => void;
+  /** `pointInEnvelope` do legado — separa plano interno de externo. */
+  pointInEnvelope?: (p: THREE.Vector3, folga?: number) => boolean;
 }
 
 export class CasaAuraScene {
@@ -97,6 +103,8 @@ export class CasaAuraScene {
       nivel: nivelDeQualidade(cena.Quality.level),
     });
 
+    this.suavizarFolhagem(cena);
+
     corte.ligar({
       scene: cena.scene, renderer: cena.renderer,
       houseGroup: cena.houseGroup, M: cena.M,
@@ -108,12 +116,60 @@ export class CasaAuraScene {
 
     diretor.ligar(cena.camera, cena.controls);
     diretor.aoFocar = (d, dur) => pos.puxarFoco(d, dur);
+    // O diretor passa a CONSUMIR o que o legado já sabe sobre atravessar
+    // parede, em vez de reimplementar. Sem estes três ganchos o Modo
+    // Apresentação abria de onde quer que o cliente tivesse deixado a
+    // câmera — a 46 m olhando para o morro, se fosse o caso — e voava
+    // por dentro da fachada até o primeiro plano.
+    diretor.cortar = cena.doFadeCut ?? null;
+    diretor.precisaCortar = cena.transitionNeedsCut ?? null;
+    diretor.dentroDaCasa = cena.pointInEnvelope ?? null;
 
     console.info(
       `[cena] upgrades ativos — AA: ${pos.temAntiAliasing}, ` +
       `DOF: ${pos.temProfundidadeDeCampo ? 'sim' : 'não'}, ` +
       `feixes: ${volumetrica.ativo ? ABERTURAS.length : 0}`,
     );
+  }
+
+  // ------------------------------------------------------------
+  /**
+   * ALPHA-TO-COVERAGE NA FOLHAGEM — cintilação de borda de folha.
+   *
+   * As sete famílias de vegetação são cartões com `alphaTest`: o pixel é
+   * rasterizado e descartado quando o alfa cai abaixo do limiar. É um
+   * teste BINÁRIO — o pixel é folha ou é fundo, sem meio-termo. Com a
+   * câmera parada isso só deixa a borda serrilhada; com a câmera ANDANDO,
+   * cada pixel de borda cruza o limiar em quadros diferentes e a copa
+   * inteira ferve. É uma das causas clássicas de "a cena não fica
+   * parada", e nesta casa a vegetação ocupa boa parte de quase todo
+   * enquadramento externo.
+   *
+   * MSAA não resolve sozinho: ele antialiasa a ARESTA DA GEOMETRIA, e a
+   * borda da folha não é aresta de geometria — é um recorte dentro de um
+   * quadrilátero inteiro. Quem resolve é `alphaToCoverage`, que converte
+   * o alfa em máscara de cobertura das amostras do MSAA. A borda passa a
+   * ter cinco níveis (0 a 4 amostras) em vez de dois, e para de ferver.
+   *
+   * Requer MSAA de verdade no alvo em que se desenha — que é por isso que
+   * isto só liga quando `pos.temAntiAliasing === 'msaa'`. Sem MSAA, o
+   * `alphaToCoverage` não teria amostras para distribuir e seria um
+   * `needsUpdate` gratuito.
+   *
+   * NÃO é redução de qualidade: é usar as quatro amostras que os alvos do
+   * composer já pagam e que a folhagem estava ignorando.
+   */
+  private suavizarFolhagem(c: CenaLegado): void {
+    if (pos.temAntiAliasing !== 'msaa') return;
+    let n = 0;
+    for (const k of Object.keys(c.M)) {
+      const m = c.M[k] as THREE.Material & { alphaTest?: number; alphaToCoverage?: boolean };
+      if (!m || !m.alphaTest || m.alphaToCoverage) continue;
+      m.alphaToCoverage = true;
+      m.needsUpdate = true;
+      n++;
+    }
+    if (n > 0) console.info(`[folhagem] alpha-to-coverage em ${n} materiais`);
   }
 
   // ------------------------------------------------------------
