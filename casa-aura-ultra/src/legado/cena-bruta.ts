@@ -3928,15 +3928,45 @@ function buildArchitecture() {
   }
 
   // --- Porta de entrada (fachada norte, ala privativa) ---
+  //
+  // ACHADO na captura do capítulo "Chegada", que é O PRIMEIRO QUADRO QUE
+  // O CLIENTE VÊ: a porta lia como um retângulo preto com um pontinho.
+  //
+  // Não é defeito de material — ela é cumaru com moldura de metal. É que
+  // fica 23 cm DENTRO do portal de pedra (portal em z = -6,25 com 28 cm
+  // de espessura; porta em -6,34), em sombra própria, e madeira escura
+  // sem luz nenhuma vai a preto. Isso é fisicamente correto e não se
+  // conserta clareando o material: conserta-se dando à porta o que faz
+  // uma porta ser lida como porta mesmo na sombra — SILHUETA e PUXADOR.
   const door = box(1.3, 2.6, 0.11, M.cumaru);
   door.position.set(9.3, 1.3, -6.34);
   arch.add(door);
   const doorFrame = box(1.5, 2.8, 0.12, M.metal);
   doorFrame.position.set(9.3, 1.4, -6.30);
   arch.add(doorFrame);
-  const handle = createDoorHandle();
-  handle.position.set(9.78, 1.25, -6.40);
-  arch.add(handle);
+
+  // Junta vertical de sombra a um terço da folha: é ela que quebra o
+  // retângulo cheio e diz "isto tem espessura e sentido de abertura".
+  const doorJunta = box(0.015, 2.44, 0.02, M.grafite, false);
+  doorJunta.position.set(9.72, 1.3, -6.395);
+  arch.add(doorJunta);
+
+  // Puxador VERTICAL de 1,4 m em vez da maçaneta de alavanca. A alavanca
+  // tem 13 cm e, vista de frente a doze metros, ocupa menos de um pixel —
+  // por isso saía como um ponto laranja. Barra vertical é a linguagem de
+  // porta pivotante contemporânea e continua legível de longe.
+  const puxador = new THREE.Mesh(
+    new THREE.CapsuleGeometry(0.022, 1.36, 4, 8), M.latao);
+  puxador.position.set(9.80, 1.30, -6.42);
+  puxador.castShadow = true;
+  arch.add(puxador);
+  for (const py of [0.66, 1.94]) {
+    const suporte = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.016, 0.016, 0.07, 8), M.latao);
+    suporte.rotation.x = Math.PI / 2;
+    suporte.position.set(9.80, py, -6.39);
+    arch.add(suporte);
+  }
   // ============================================================
   // ARTICULAÇÃO DAS FACHADAS CEGAS
   // Encontrado renderizando: as fachadas norte e oeste eram planos de
@@ -4708,8 +4738,38 @@ function createPottedPlant(scale) {
     [0.15*s,0],[0.20*s,0.06*s],[0.235*s,0.16*s],[0.215*s,0.28*s],[0.225*s,0.32*s],[0.205*s,0.325*s]
   ], 18, M.vaso);
   g.add(pot);
-  const foliage = new THREE.Mesh(new THREE.IcosahedronGeometry(0.42 * s, 0), M.copaArvore2);
-  foliage.position.y = 0.75 * s; foliage.castShadow = true; g.add(foliage);
+  // FOLHAGEM EM CARTÕES, e não um icosaedro vestido de folha.
+  //
+  // Era `IcosahedronGeometry(0.42, 0)`: o sólido platônico CRU, 20 faces,
+  // com o material de copa por cima. Num vaso que o capítulo "Paisagismo"
+  // põe a dois metros da câmera, aquilo lê como poliedro verde.
+  //
+  // É exatamente o defeito que este arquivo já condena em
+  // `boulderGeometry`: "as pedras decorativas eram IcosahedronGeometry(1,
+  // 0) ... lia como gema de jogo". O mesmo erro sobreviveu aqui, e num
+  // objeto que fica MAIS perto do olho que as pedras.
+  //
+  // A casa inteira resolve folhagem com cartão de alfa recortado. Este
+  // vaso passa a fazer o mesmo: cartões cruzados distribuídos numa
+  // meia-esfera, com a normal apontando para fora, que é como
+  // `emitShrub` já monta os arbustos.
+  const cartao = new THREE.PlaneGeometry(1, 1);
+  const dir = new THREE.Vector3();
+  for (let i = 0; i < 14; i++) {
+    // distribuição em meia-esfera: a folhagem cresce para cima e para os
+    // lados, nunca para dentro do vaso
+    const u = Math.random() * 0.85;
+    const phi = Math.random() * Math.PI * 2;
+    const rr = Math.sqrt(1 - u * u);
+    dir.set(rr * Math.cos(phi), u * 0.75 + 0.2, rr * Math.sin(phi));
+    const tam = (0.30 + Math.random() * 0.20) * s;
+    const folha = new THREE.Mesh(cartao, M.copaArvore2);
+    folha.position.set(dir.x * 0.26 * s, 0.62 * s + dir.y * 0.24 * s, dir.z * 0.26 * s);
+    folha.scale.set(tam, tam, 1);
+    folha.lookAt(folha.position.clone().add(dir));
+    folha.castShadow = true;
+    g.add(folha);
+  }
   return g;
 }
 
@@ -5402,8 +5462,15 @@ function buildPrimarySuite() {
   art.rotation.y = Math.PI / 2;
   g.add(art);
 
-  const suiteBaseboard = createBaseboardRun([[4.4, -6.0], [9.2, -6.0]], 0.09, M.portaEscura);
-  g.add(suiteBaseboard);
+  // O rodapé de madeira de 9 cm que existia aqui SAIU, pelo mesmo motivo
+  // que o da sala: `buildInteriorTrim()` já passa a junta de sombra por
+  // esta parede (corrida da suíte norte, z = -5,99). Os dois juntos
+  // punham uma peça saliente e um vinco a 3 cm um do outro.
+  //
+  // A revisão pegou a duplicação na sala; esta aqui eu deixei passar, e
+  // só apareceu relendo os chamadores de `createBaseboardRun`. Agora
+  // aquela função não tem mais nenhum chamador — fica disponível para
+  // quem quiser rodapé saliente em algum cômodo, mas nada a usa.
 
   // ===== BANHEIRO DA SUÍTE =====
   const vanity = createVanity(1.3);
