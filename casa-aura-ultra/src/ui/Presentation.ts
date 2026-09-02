@@ -33,6 +33,26 @@ interface PlanoRoteiro extends Plano {
   luz?: string;
 }
 
+/**
+ * Espera uma transição da máquina de estados terminar, com teto.
+ *
+ * DEFEITO ENCONTRADO medindo: o corretor aperta "Explorar" e, um segundo
+ * depois, "Apresentação". A primeira transição ainda está correndo (400 ms
+ * de fade mais o que o callback levar), `fsm.ir()` recusa em silêncio, o
+ * `iniciar()` faz `return` — e como a interceptação em fase de captura já
+ * chamou `stopPropagation()`, o handler herdado também não roda. O clique
+ * some por completo, sem nenhum retorno para quem apertou.
+ *
+ * Botão que não faz nada é o pior tipo de defeito de interface, porque o
+ * usuário não sabe se apertou errado ou se o produto quebrou.
+ */
+async function esperarTransicao(fsm: StateMachine, tetoMs = 1600): Promise<void> {
+  const t0 = performance.now();
+  while (fsm.transicionando && performance.now() - t0 < tetoMs) {
+    await new Promise((r) => setTimeout(r, 60));
+  }
+}
+
 interface CenaMinima {
   setLightMode?: (m: string, dur?: number) => void;
   Experience?: { set?: (s: string) => void };
@@ -124,6 +144,10 @@ class Apresentacao {
 
   async iniciar(): Promise<void> {
     if (this.rodando || !this.fsm) return;
+    // Se há uma transição em curso, espera ela acabar em vez de perder o
+    // clique. Ver `esperarTransicao`.
+    await esperarTransicao(this.fsm);
+    if (this.rodando) return;   // outro caminho pode ter iniciado durante a espera
     // A FSM decide se a transição é legal. Se não for, não força.
     const ok = await this.fsm.ir('PRESENTATION', () => {
       document.getElementById('hero')?.classList.add('hidden');
@@ -136,7 +160,11 @@ class Apresentacao {
       // podiam ser alcancados.
       this.cena?.Experience?.set?.('presenting');
     });
-    if (!ok) return;
+    if (!ok) {
+      console.warn('[apresentação] a máquina de estados recusou PRESENTATION '
+        + 'e a espera não resolveu; o clique não teve efeito');
+      return;
+    }
 
     this.rodando = true;
     this.indice = 0;

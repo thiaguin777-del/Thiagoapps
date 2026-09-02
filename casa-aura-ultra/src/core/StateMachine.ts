@@ -128,6 +128,20 @@ export class StateMachine {
     });
   }
 
+  /**
+   * Há uma transição em curso? Uma transição dura os 400 ms dos dois
+   * fades mais o que o callback `durante` levar, e enquanto ela corre
+   * `ir()` RECUSA qualquer pedido novo — em silêncio, devolvendo false.
+   *
+   * Quem chama precisa poder distinguir "recusado porque é ilegal" de
+   * "recusado porque estou ocupado agora": o primeiro é para desistir, o
+   * segundo é para tentar de novo daqui a pouco. Sem essa diferença, um
+   * clique feito na janela errada simplesmente some.
+   */
+  get transicionando(): boolean {
+    return this.emTransicao;
+  }
+
   /** Fecha a contagem do estado corrente. Usado antes de enviar telemetria. */
   fecharContagem(): void {
     const agora = performance.now();
