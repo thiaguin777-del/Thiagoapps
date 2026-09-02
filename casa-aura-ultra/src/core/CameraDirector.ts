@@ -376,6 +376,27 @@ export class CameraDirector {
     _dummy.lookAt(this.alvoAtual);
     this.quatFim.copy(_dummy.quaternion);
 
+    // ------------------------------------------------------------
+    // A LENTE VOLTA AO PADRÃO A CADA PLANO
+    //
+    // DEFEITO MEDIDO percorrendo o filme: o plano "O estar" pede dolly
+    // zoom e termina com a lente em 54,67° — que é o efeito funcionando,
+    // a câmera se aproxima e o campo abre para segurar o enquadramento.
+    // Só que o plano seguinte fazia `fovFim = p.fovFinal ?? cam.fov`, ou
+    // seja herdava 54,67°, e a condição `fovFim !== fovInicio` passava a
+    // ser falsa: os SEIS planos restantes do filme rodavam em 54,67° em
+    // vez dos 40° compostos. Grande-angular em tudo, com a distorção que
+    // vem junto, por herança de um plano anterior.
+    //
+    // Cada plano é um CORTE. Corte troca de lente. A lente volta ao valor
+    // que o cliente tinha antes do filme, a não ser que este plano seja
+    // justamente o que quer preservar o enquadramento de onde veio.
+    // ------------------------------------------------------------
+    if (!p.dollyZoom && this.fovDoUsuario > 0 && cam.fov !== this.fovDoUsuario) {
+      cam.fov = this.fovDoUsuario;
+      cam.updateProjectionMatrix();
+    }
+
     // Dolly zoom: guarda a distância inicial ao assunto para manter o
     // produto tan(fov/2)·distância constante durante o percurso.
     this.fovInicio = cam.fov;
