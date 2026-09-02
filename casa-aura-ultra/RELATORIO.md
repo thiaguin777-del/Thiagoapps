@@ -1258,3 +1258,49 @@ compila de forma síncrona.
 | Noite: 27,6% dos pixels de parede acima de 240 | **ABERTO** | medido, não corrigido |
 | Galeria 360° | **BLOCKED BY EXTERNAL DEPENDENCY** | não há panorâmicas no repositório |
 | Persistência (Supabase) | **BLOCKED BY EXTERNAL DEPENDENCY** | conector sem projeto; criar um é ação paga na conta do Thiago |
+
+## 12.11 Verificação final, no build com todas as correções
+
+O filme percorrido do começo ao fim com o diretor chamado direto (sem
+desenhar — ver `CameraDirector.estado` para o porquê), entrando pelo
+botão a partir do pior caso possível: câmera a 40 m do alvo, de costas
+para a casa, com o pan deslocado para o morro.
+
+| plano | pior mira na 2ª metade | mira no fim | fov | posição final |
+|---|---|---|---|---|
+| 0 Chegada | 1,69° | **0,00°** | 40 | 18 / 7,5 / 16 |
+| 1 A fachada | 0,69° | **0,01°** | 40 | 1 / 3 / 13,5 |
+| 2 O estar | 0,00° | **0,00°** | 54,67 | −8,6 / 1,6 / 3,2 |
+| 3 Cozinha e jantar | 0,70° | **0,00°** | 40 | −2,6 / 1,7 / 4,2 |
+| 4 O terraço | 0,99° | **0,00°** | 40 | 3,2 / 5,4 / 6,2 |
+| 5 A piscina | 2,28° | **0,00°** | 40 | −4,2 / 3,3 / 17,6 |
+| 6 Entardecer | 0,99° | **0,00°** | 40 | 14 / 6 / 15 |
+| 7 Casa Aura | 1,25° | **0,00°** | 40 | −19 / 9 / 19 |
+
+Os oito chegam na posição EXATA do roteiro. O erro de mira, que antes
+tendia a 180° no fim de todo plano, agora é zero. O plano 2 é o único em
+54,67° — é o dolly zoom dele funcionando — e o plano 3 volta a 40°, o que
+antes não acontecia: a lente vazava para os seis planos seguintes.
+
+O filme termina sozinho (`indice 8, rodando false`) e devolve a câmera em
+ordem: trava solta, orbit religado, modo `explore`, fov de volta em 40.
+**Zero erros de console** no percurso inteiro.
+
+Validação geométrica dos oito planos, nas duas poses de cada um:
+**nenhum problema**. Cobertura da casa no quadro por plano —
+
+| plano | partida | chegada |
+|---|---|---|
+| 0 Chegada | 20% | 44% |
+| 1 A fachada | 60% | 76% |
+| 2 O estar | 100% | 100% |
+| 3 Cozinha e jantar | 100% | 100% |
+| 4 O terraço | 88% | 92% |
+| 5 A piscina | 68% | 48% |
+| 6 Entardecer | 36% | 60% |
+| 7 Casa Aura | 24% | 44% |
+
+"A piscina" é o único cujo centro de quadro não encontra edifício — o
+assunto dele é a lâmina d'água, que é sítio e não construção, e ainda
+assim 68% do quadro é casa. É por isso que a regra do validador é "ou o
+assunto no centro, ou a casa dominando o quadro".
