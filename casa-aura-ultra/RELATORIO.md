@@ -1214,3 +1214,47 @@ rasterização dos triângulos por plano no primeiro, seis raios nos eixos
 no segundo. Depois da troca, o total de área em risco de z-fighting caiu
 de 534 723 m² (fantasia) para 15,25 m² reais, todos em faces voltadas
 para BAIXO e ocluídas pela laje logo abaixo.
+
+## 12.9 Defeitos desta rodada, em ordem de gravidade
+
+Nove defeitos, todos encontrados por medição ou por leitura da fonte —
+nenhum por palpite. Os três últimos vieram do passe de red-team sobre as
+próprias correções desta rodada.
+
+| # | defeito | como apareceu | tamanho medido |
+|---|---|---|---|
+| 1 | Apresentação terminava cada plano **de costas** para a casa | validador dando 0 ou 1, nunca no meio | **180,00°** de erro angular |
+| 2 | Gramado do lote **atravessava** o relevo | detector de z-fighting por triângulo | **10,886 m** de amplitude |
+| 3 | Mata e morros apoiados no **espelho** do terreno | conferindo a matemática de `farGroundHeight` | **6,1 m** médios, 14,5 m máx |
+| 4 | Aba oculta **travava o boot para sempre** | red-team da pré-compilação | rAF não dispara em aba oculta |
+| 5 | Lente do dolly zoom **vazava** para os 6 planos seguintes | percorrendo o filme plano a plano | 54,67° em vez de 40° |
+| 6 | `lerpCam` do legado escrevia na câmera **durante o corte** | leitura de `animate()` | 18 quadros de arrasto a 60 Hz |
+| 7 | Mata distante **fora** das duas correções de cintilação | red-team | anéis de 46 a 435 m |
+| 8 | Dois fades sobrepostos **abriam a tela na pose antiga** | red-team | teleporte visível em t≈360 ms |
+| 9 | Clique de "Apresentação" **sumia** durante um fade da FSM | medindo: o diretor ficava em `indice: -1` | janela de ~400 ms |
+
+E dois erros de método meus, corrigidos no caminho: caixa envolvente para
+descrever geometria fundida (duas vezes — no detector de z-fighting e no
+validador) e um teto de tempo que não segurava nada porque `compileAsync`
+compila de forma síncrona.
+
+## 12.10 Matriz de conclusão
+
+| item | estado | prova |
+|---|---|---|
+| Modo Apresentação enquadra a casa | **DONE** | erro de mira 0,00–0,01° no fim dos 8 planos; cobertura por plano medida com 25 raios |
+| Câmera estável na exploração livre | **DONE** | 240 iterações × 4 cenários, salto máximo 0,000 mm |
+| Z-fighting no terreno | **DONE** | folga 20–176 mm lida dos vértices na GPU; margem 10–54× sobre o buffer |
+| Vegetação apoiada no terreno | **DONE** | `alturaDoCampo` bate com a malha por construção |
+| Cintilação de textura (anisotropia) | **DONE** | varredura da cena, não mais lista à mão |
+| Cintilação de borda de folha | **DONE** | alpha-to-coverage em todo material com `alphaTest` na cena |
+| Determinismo da cena | **DONE** | zero `Math.random()` em módulo tipado |
+| Pré-compilação de shader | **DONE** | 58 → 99 programas; orçamento real de 6 s; sem travar aba oculta |
+| Instrumento de tempo de quadro | **DONE** | p50/p95/p99/pior + engasgos, no console e na telemetria |
+| **Tempo de quadro em hardware real** | **UNMEASURED** | esta máquina não tem GPU (SwiftShader, ~0,1 quadro/s) |
+| **Inspeção visual das correções** | **UNTESTED** | mesma razão; toda prova aqui é geométrica ou numérica |
+| Blocos de acabamento (fachada, paisagismo, interface) | **NÃO INICIADO** | a rodada foi inteira nos bloqueadores P0 |
+| Ilha da cozinha sem frentes/puxadores | **ABERTO** | medido em rodada anterior, não corrigido |
+| Noite: 27,6% dos pixels de parede acima de 240 | **ABERTO** | medido, não corrigido |
+| Galeria 360° | **BLOCKED BY EXTERNAL DEPENDENCY** | não há panorâmicas no repositório |
+| Persistência (Supabase) | **BLOCKED BY EXTERNAL DEPENDENCY** | conector sem projeto; criar um é ação paga na conta do Thiago |
