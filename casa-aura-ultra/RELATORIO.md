@@ -603,6 +603,70 @@ na luz. Mas depois de travar dois segundos, a luz **deve** estar dois
 segundos adiante, não dois atrasada. O salto era o comportamento certo, e
 eu o tinha tratado como defeito.
 
+### 11. Os oito capítulos que eu nunca tinha olhado
+
+Até aqui eu tinha inspecionado quatro enquadramentos. Sobravam oito que o
+cliente vê e eu nunca tinha visto.
+
+Uma armadilha do instrumento antes dos defeitos: chamei `goToChapter`
+(que inicia um voo por curva) e em seguida setei a câmera à mão.
+`lerpCam` sobrescreve com `camCurve.getPointAt(e)`, e a captura saía a
+**24 m do alvo** — não era o enquadramento do capítulo. Deixando o voo
+convergir, o erro final ficou entre 0 e 0,5 m.
+
+**Corrigidos:**
+
+- **A porta de entrada lia como retângulo preto com um pontinho** — e
+  isso no capítulo "Chegada", o primeiro quadro que o cliente vê. Não era
+  material: é cumaru com moldura de metal, mas fica 23 cm dentro do
+  portal de pedra, em sombra própria. Madeira escura sem luz vai a preto,
+  e isso é fisicamente correto — não se conserta clareando o material.
+  Conserta-se dando à porta o que a faz legível na sombra: junta vertical
+  de sombra e puxador vertical de 1,36 m. A alavanca anterior tinha 13 cm
+  e, vista de frente a doze metros, ocupava menos de um pixel.
+- **O vaso de planta era um icosaedro cru** — `IcosahedronGeometry(0.42,
+  0)`, 20 faces, vestido com material de copa, a dois metros da câmera no
+  capítulo "Paisagismo". É o mesmo defeito que este arquivo já condena em
+  `boulderGeometry` ("lia como gema de jogo"), sobrevivendo num objeto
+  mais próximo do olho que as pedras. Agora são 16 cartões de alfa
+  recortado.
+  *Errei o conserto na primeira tentativa*: a massa ficou **flutuando**
+  35 cm acima do bordo, porque mantive o centro do icosaedro e encolhi a
+  extensão vertical. Corrigido descendo a distribuição abaixo do equador —
+  que também é o certo: folha de vaso tomba sobre a borda.
+- **Rodapé duplicado na suíte**, e este é meu. A revisão pegou a
+  duplicação na sala; esta eu deixei passar. Removido. `createBaseboardRun`
+  agora não tem nenhum chamador.
+
+**Achados, medidos, NÃO corrigidos:**
+
+- **A colina distante é 7,2× mais clara que as árvores à frente dela, à
+  noite.** No capítulo "Visão Final":
+
+  | região | distância | média | R / G / B |
+  |---|---|---|---|
+  | céu | — | 8,0 | 0 / 5 / 59 |
+  | colina | 225–435 m | **38,3** | 30 / 43 / 20 |
+  | árvores | 46–218 m | **5,1** | 0,5 / 7 / 0,4 |
+
+  É a mesma inversão de perspectiva aérea que foi corrigida para o dia.
+  **Minha primeira hipótese estava errada e a medição a derrubou:** pela
+  aritmética dos canais eu concluí que a névoa não chegava às colinas.
+  Ligando e desligando `fog` no material em tempo de execução, a região
+  vai de 38,3 para 56,6 — a névoa chega. O que sobra é que elas são a
+  maior superfície voltada para cima da cena e recebem hemisférica 0,85 +
+  ambiente 0,18 à noite. Corrigir isso sem escurecer o jardim (que lê
+  bem) exige tratamento dependente da hora, e não entrei nele.
+- **A ilha da cozinha é uma caixa creme sem portas, gavetas, puxadores
+  nem rodapé.** Mesmo padrão dos rodapés: o mobiliário está blocado, não
+  detalhado. Capítulo "Cozinha & Jantar".
+- **A fachada norte continua um plano branco extenso** com manchas largas
+  da variação macro que leem como umidade. O comentário do código diz que
+  isso foi resolvido com portal, rasgos e brise — resolveu em parte; a
+  área entre os elementos continua vazia.
+- **Vão preto no Terraço Superior**: ~25% do quadro em preto absoluto na
+  hora dourada.
+
 ### Erro meu de leitura, registrado para não voltar
 
 - **Erro meu de leitura, registrado para não voltar:** capturei a piscina

@@ -4753,18 +4753,30 @@ function createPottedPlant(scale) {
   // vaso passa a fazer o mesmo: cartões cruzados distribuídos numa
   // meia-esfera, com a normal apontando para fora, que é como
   // `emitShrub` já monta os arbustos.
+  // A MASSA PRECISA ENCOSTAR NO BORDO DO VASO.
+  //
+  // Na primeira versao deste conserto ela ficou FLUTUANDO. A conta:
+  // o perfil torneado do vaso termina em 0,325*s, e eu distribui as
+  // folhas entre 0,67 e 0,82*s -- um vao de 0,35*s de ar entre o bordo e
+  // a folha mais baixa. O icosaedro que saiu tinha raio 0,42 centrado em
+  // 0,75, ou seja base em 0,33: encostava. Eu mantive o centro dele e
+  // encolhi a extensao vertical, e a planta descolou do vaso.
+  //
+  // Agora a distribuicao desce ate abaixo do equador (`u` vai a -0,7),
+  // que tambem e o certo botanicamente: folha de vaso TOMBA sobre a
+  // borda, nao paira acima dela.
   const cartao = new THREE.PlaneGeometry(1, 1);
   const dir = new THREE.Vector3();
-  for (let i = 0; i < 14; i++) {
-    // distribuição em meia-esfera: a folhagem cresce para cima e para os
-    // lados, nunca para dentro do vaso
-    const u = Math.random() * 0.85;
+  for (let i = 0; i < 16; i++) {
+    const u = Math.random() * 1.7 - 0.7;          // -0,7 a 1,0
     const phi = Math.random() * Math.PI * 2;
-    const rr = Math.sqrt(1 - u * u);
-    dir.set(rr * Math.cos(phi), u * 0.75 + 0.2, rr * Math.sin(phi));
-    const tam = (0.30 + Math.random() * 0.20) * s;
+    const rr = Math.sqrt(Math.max(0, 1 - u * u));
+    dir.set(rr * Math.cos(phi), u, rr * Math.sin(phi));
+    const tam = (0.28 + Math.random() * 0.20) * s;
     const folha = new THREE.Mesh(cartao, M.copaArvore2);
-    folha.position.set(dir.x * 0.26 * s, 0.62 * s + dir.y * 0.24 * s, dir.z * 0.26 * s);
+    // centro em 0,55*s com meia-altura 0,26*s -> massa de 0,37 a 0,81*s,
+    // encostando no bordo em 0,325
+    folha.position.set(dir.x * 0.24 * s, 0.55 * s + dir.y * 0.26 * s, dir.z * 0.24 * s);
     folha.scale.set(tam, tam, 1);
     folha.lookAt(folha.position.clone().add(dir));
     folha.castShadow = true;
