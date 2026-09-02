@@ -160,16 +160,60 @@ export class CasaAuraScene {
    * composer já pagam e que a folhagem estava ignorando.
    */
   private suavizarFolhagem(c: CenaLegado): void {
-    if (pos.temAntiAliasing !== 'msaa') return;
-    let n = 0;
-    for (const k of Object.keys(c.M)) {
-      const m = c.M[k] as THREE.Material & { alphaTest?: number; alphaToCoverage?: boolean };
-      if (!m || !m.alphaTest || m.alphaToCoverage) continue;
-      m.alphaToCoverage = true;
-      m.needsUpdate = true;
-      n++;
-    }
-    if (n > 0) console.info(`[folhagem] alpha-to-coverage em ${n} materiais`);
+    // ------------------------------------------------------------
+    // A VARREDURA É SOBRE A CENA, NÃO SOBRE `M`
+    //
+    // A primeira versão iterava `c.M`, o dicionário de materiais do
+    // legado. Ela deixava de fora exatamente o pior caso: `farMat`, o
+    // cartão da MATA DISTANTE, é uma variável local de
+    // `buildDistantLandscape` e nunca entra em `M`. São os anéis de 46 a
+    // 435 m — a maior área de folhagem de qualquer vista externa, vista
+    // sempre em ângulo rasante, que é onde cartão com `alphaTest` mais
+    // ferve. A vegetação perto ficava corrigida e o fundo continuava
+    // cintilando.
+    //
+    // É a MESMA falha da lista de anisotropia à mão que este arquivo
+    // corrigiu duas horas atrás: dicionário não é inventário. O
+    // inventário é a cena.
+    //
+    // Aproveita a mesma passagem para a anisotropia: `setupMaterials`
+    // roda antes de a cena existir, então lá também só dá para varrer
+    // `M`. Aqui a cena está montada e o alcance é total.
+    // ------------------------------------------------------------
+    const aniso = Math.min(8, c.renderer.capabilities.getMaxAnisotropy());
+    const msaa = pos.temAntiAliasing === 'msaa';
+    const SLOTS = [
+      'map', 'normalMap', 'roughnessMap', 'metalnessMap', 'aoMap', 'emissiveMap',
+      'alphaMap', 'bumpMap', 'displacementMap', 'lightMap', 'specularMap',
+    ] as const;
+    const vistos = new Set<THREE.Material>();
+    const texturasVistas = new Set<THREE.Texture>();
+    let nA2C = 0, nAniso = 0;
+    c.scene.traverse((o) => {
+      const mat = (o as THREE.Mesh).material;
+      if (!mat) return;
+      for (const m of (Array.isArray(mat) ? mat : [mat])) {
+        if (!m || vistos.has(m)) continue;
+        vistos.add(m);
+        const mm = m as THREE.Material & {
+          alphaTest?: number; alphaToCoverage?: boolean;
+          [k: string]: unknown;
+        };
+        if (msaa && mm.alphaTest && !mm.alphaToCoverage) {
+          mm.alphaToCoverage = true;
+          mm.needsUpdate = true;
+          nA2C++;
+        }
+        for (const slot of SLOTS) {
+          const t = mm[slot] as THREE.Texture | undefined;
+          if (!t || !t.isTexture || texturasVistas.has(t)) continue;
+          texturasVistas.add(t);
+          if (t.anisotropy !== aniso) { t.anisotropy = aniso; t.needsUpdate = true; nAniso++; }
+        }
+      }
+    });
+    console.info(`[folhagem] varredura da cena: ${vistos.size} materiais, `
+      + `alpha-to-coverage em ${nA2C}, anisotropia corrigida em ${nAniso} mapas`);
   }
 
   // ------------------------------------------------------------

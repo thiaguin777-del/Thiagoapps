@@ -201,7 +201,28 @@ async function principal(): Promise<void> {
       };
       r.compile(falsaCena, cena.camera, cena.scene);
       compilados += pedaco.length;
-      await new Promise((res) => requestAnimationFrame(() => res(null)));
+      // ------------------------------------------------------------
+      // CEDER O QUADRO SEM DEPENDER DE `requestAnimationFrame`
+      //
+      // rAF NÃO DISPARA em aba oculta. A primeira versão cedia só por
+      // rAF, dentro do caminho de boot e ANTES de `fsm.ir('HERO')`: um
+      // corretor que abre o link numa aba de fundo — o caso normal,
+      // clicou e foi ler outra coisa — ficava preso na tela de
+      // carregamento até voltar para a aba. E o orçamento não salvava,
+      // porque ele só é conferido no TOPO do laço, enquanto a execução
+      // estava parada no await. O fallback de 20 s do legado também não
+      // pega: `initDone` já é verdadeiro a esta altura.
+      //
+      // Corrida entre o quadro e um relógio: em aba visível vence o rAF
+      // (cede de verdade, a animação de carregamento continua); em aba
+      // oculta vence o timer e o laço segue até o orçamento acabar.
+      // ------------------------------------------------------------
+      await new Promise((res) => {
+        let pronto = false;
+        const uma = () => { if (!pronto) { pronto = true; res(null); } };
+        requestAnimationFrame(uma);
+        setTimeout(uma, 50);
+      });
     }
     const ms = performance.now() - t0;
     const depois = r.info.programs?.length ?? 0;

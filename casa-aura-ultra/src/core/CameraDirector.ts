@@ -137,14 +137,23 @@ export class CameraDirector {
   /** Enquanto o fade do corte roda, a câmera não é tocada. */
   private emCorte = false;
   /**
-   * Ficha do corte em curso. O fade dura 300 ms e nesse intervalo o
-   * cliente pode apertar "próximo" ou "sair" — e aí o callback agendado
-   * ainda dispararia, reposicionando a câmera para o plano ANTIGO depois
-   * de a apresentação já ter seguido em frente (ou já ter terminado).
-   * O mesmo padrão de ficha que `Experience.startCinematic()` usa no
-   * legado, e pelo mesmo motivo.
+   * O corte pendente, se houver. UM fade por vez, e o último pedido
+   * vence.
+   *
+   * A primeira versão usava uma ficha para invalidar o callback velho —
+   * o que protegia a escrita na câmera, mas não o VÉU. `doFadeCut` do
+   * legado agenda a remoção do fade 60 ms depois da própria aplicação, e
+   * faz isso incondicionalmente. Dois cortes sobrepostos (dois cliques em
+   * "próximo" dentro de 300 ms, ou sair e reentrar) davam: fade do corte
+   * A abre em t≈360 ms mostrando a pose ANTIGA, e a pose nova entra de
+   * supetão em t≈400 ms. Exatamente o teleporte que o fade existe para
+   * esconder.
+   *
+   * Agora, se um fade já está cobrindo a tela, o pedido novo só substitui
+   * o conteúdo pendente e nenhum segundo fade é agendado. O callback que
+   * já existe aplica o mais recente.
    */
-  private fichaDoCorte = 0;
+  private corteEmEspera: (() => void) | null = null;
   /** Fov do usuário no momento de assumir a câmera, para devolver igual. */
   private fovDoUsuario = 0;
   private mantemEnquadramento = false;
@@ -218,8 +227,8 @@ export class CameraDirector {
     // depois com a lente errada para sempre — inclusive nas fotos que o
     // corretor tira da tela.
     if (!this.rodando) this.fovDoUsuario = this.camera.fov;
-    // Invalida qualquer corte pendente de uma reprodução anterior.
-    this.fichaDoCorte++;
+    // Descarta corte pendente de uma reprodução anterior.
+    this.corteEmEspera = null;
     this.emCorte = false;
     this.rodando = true;
     if (this.controls) this.controls.enabled = false;
@@ -242,7 +251,7 @@ export class CameraDirector {
     if (!this.rodando) return;
     this.rodando = false;
     this.emCorte = false;
-    this.fichaDoCorte++;
+    this.corteEmEspera = null;
     this.curva = null;
     (window as unknown as { __auraCameraTravada?: boolean }).__auraCameraTravada = false;
     if (this.camera && this.fovDoUsuario > 0 && this.camera.fov !== this.fovDoUsuario) {
@@ -331,19 +340,27 @@ export class CameraDirector {
     // CORTE. Enquanto o fade cobre a tela a câmera é reposicionada e
     // JÁ ORIENTADA no assunto: o primeiro quadro depois do fade é uma
     // composição, nunca uma paisagem.
-    this.emCorte = true;
-    const ficha = ++this.fichaDoCorte;
-    const aplicar = (): void => {
-      // Corte vencido: outro corte foi pedido, ou a apresentação
-      // terminou, durante os 300 ms do fade. Não toca na câmera.
-      if (ficha !== this.fichaDoCorte || !this.rodando) return;
+    // O que este corte quer fazer quando o véu estiver cobrindo a tela.
+    this.corteEmEspera = (): void => {
       cam.position.copy(partida);
       _dummy.position.copy(partida);
       _dummy.lookAt(alvo);
       cam.quaternion.copy(_dummy.quaternion);
       if (this.controls) this.controls.target.copy(alvo);
-      this.emCorte = false;
       this.montarMovimento(p, fim, alvo);
+    };
+
+    // Já há um fade cobrindo a tela: o callback dele vai pegar este
+    // conteúdo. Agendar um segundo fade é o que produzia o teleporte.
+    if (this.emCorte) return;
+
+    this.emCorte = true;
+    const aplicar = (): void => {
+      const fazer = this.corteEmEspera;
+      this.corteEmEspera = null;
+      this.emCorte = false;
+      // A apresentação pode ter terminado durante os 300 ms do fade.
+      if (fazer && this.rodando) fazer();
     };
     if (this.cortar) this.cortar(aplicar); else aplicar();
   }
