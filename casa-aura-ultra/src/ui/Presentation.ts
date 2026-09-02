@@ -66,6 +66,11 @@ const PLANOS: PlanoRoteiro[] = (roteiro.planos as Record<string, unknown>[]).map
   mirarSempre: p.mirarSempre === true,
   foco: p.foco === undefined ? undefined : Number(p.foco),
   fovFinal: p.fovFinal === undefined ? undefined : Number(p.fovFinal),
+  dollyZoom: p.dollyZoom === true,
+  // `partida` é o que impede a apresentação de abrir mostrando paisagem:
+  // o plano CORTA para uma pose composta antes de se mover, em vez de
+  // voltar voando de onde quer que o cliente tivesse deixado a câmera.
+  partida: p.partida === undefined ? undefined : trio(p.partida as number[], `plano ${i} .partida`),
   pausa: p.pausa === undefined ? undefined : Number(p.pausa),
   luz: p.luz === undefined ? undefined : String(p.luz),
 }));
@@ -143,9 +148,10 @@ class Apresentacao {
   private pular(d: number): void {
     const i = Math.max(0, Math.min(PLANOS.length - 1, this.indice + d));
     if (i === this.indice) return;
-    // Reproduzir a partir de um índice: a fatia restante do roteiro. O
-    // diretor sempre parte da posição ATUAL da câmera, então cortar a
-    // lista já entrega o movimento certo.
+    // Reproduzir a partir de um índice: a fatia restante do roteiro. Cada
+    // plano sabe de onde começa (`partida`) ou deriva um começo composto,
+    // então pular para o meio do filme entrega o mesmo enquadramento que
+    // assistir desde o início — o que antes não era verdade.
     this.indice = i;
     this.inicioDaFatia = i;
     diretor.reproduzir(PLANOS.slice(i));
@@ -212,6 +218,15 @@ class Apresentacao {
 
   get totalDePlanos(): number {
     return PLANOS.length;
+  }
+
+  /**
+   * O roteiro, para o validador geométrico. Exposto porque afirmar "os
+   * planos foram validados" sem que nada consiga LER os planos seria uma
+   * afirmação sem prova por trás.
+   */
+  get roteiro(): PlanoRoteiro[] {
+    return PLANOS;
   }
 
   destruir(): void {
