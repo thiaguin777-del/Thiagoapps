@@ -77,7 +77,41 @@ export interface Plano {
 
 type AoTrocarPlano = (indice: number, plano: Plano) => void;
 
-const _dummy = new THREE.Object3D();
+/**
+ * SUPORTE DE ORIENTAÇÃO — e ele PRECISA ser uma Camera, não um Object3D.
+ *
+ * BUG ENCONTRADO, e é a causa raiz do defeito que o cliente relatou como
+ * "o Modo Apresentação mostra a paisagem em vez da casa".
+ *
+ * `Object3D.lookAt()` e `Camera.lookAt()` produzem quaternions OPOSTOS,
+ * de propósito: um objeto comum aponta o +Z dele para o alvo (é o que
+ * faz sentido para uma seta, um cartão, um holofote); uma câmera olha
+ * pelo -Z. O próprio Three.js troca os argumentos de `Matrix4.lookAt`
+ * conforme `this.isCamera`.
+ *
+ * Copiar o quaternion de um `Object3D` orientado para uma câmera põe a
+ * câmera olhando EXATAMENTE para o lado contrário do assunto.
+ *
+ * MEDIDO, com a pose real do plano "Chegada" (olho 18/7,5/16, alvo
+ * -1/4,2/0):
+ *
+ *   direção correta câmera->alvo ......... [-0,758, -0,132, -0,639]
+ *   Object3D.lookAt -> frente ............ [ 0,758,  0,132,  0,639]
+ *   erro angular ......................... 180,00 graus
+ *   PerspectiveCamera.lookAt -> erro ..... 0,00 grau
+ *
+ * Por que o sintoma era intermitente e não uma tela sempre errada: em
+ * cada plano a orientação faz slerp de `quatInicio` (a orientação REAL
+ * da câmera naquele instante, que está certa) até `quatFim` (calculado
+ * pelo suporte, 180 graus errado). O plano COMEÇA enquadrado e vai
+ * girando até terminar de costas para a casa — mostrando o céu e o
+ * relevo de fundo. É exatamente o relato.
+ *
+ * `THREE.Camera` é a correção mínima: ela tem `isCamera = true`, então
+ * `lookAt` toma o ramo certo. Não é um Object3D com um comentário
+ * pedindo cuidado — é o tipo que já carrega a semântica.
+ */
+const _dummy = new THREE.Camera();
 const _v = new THREE.Vector3();
 const _vB = new THREE.Vector3();
 const _vC = new THREE.Vector3();
