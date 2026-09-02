@@ -1146,3 +1146,71 @@ pedaços de 8 objetos, cedendo um quadro entre eles, com orçamento real de
 - **Inspeção visual das correções.** `UNTESTED`. Nenhuma captura foi
   feita depois das correções de terreno; o que existe é prova geométrica
   e numérica.
+
+## 12.7 A causa raiz do Modo Apresentação: cada plano terminava de costas
+
+Achado depois, e é a causa direta do relato "o Modo Apresentação mostra a
+paisagem em vez da casa".
+
+`Object3D.lookAt()` e `Camera.lookAt()` produzem quaternions **opostos**,
+de propósito: um objeto comum aponta o +Z dele para o alvo (o que faz
+sentido para uma seta, um cartão de folha, um holofote); uma câmera olha
+pelo −Z. O próprio Three.js troca os argumentos de `Matrix4.lookAt`
+conforme `this.isCamera`.
+
+O CameraDirector calculava a orientação final de cada plano com um
+suporte `new THREE.Object3D()` e copiava o quaternion dele para a câmera.
+
+Medido com a pose real do plano "Chegada" (olho 18/7,5/16, alvo −1/4,2/0):
+
+| suporte | frente resultante | erro angular |
+|---|---|---|
+| direção correta câmera→alvo | −0,758 / −0,132 / −0,639 | — |
+| `Object3D.lookAt` | +0,758 / +0,132 / +0,639 | **180,00°** |
+| `PerspectiveCamera.lookAt` | −0,758 / −0,132 / −0,639 | 0,00° |
+
+**Por que o sintoma era intermitente** e não uma tela sempre errada: em
+cada plano a orientação faz slerp de `quatInicio` — a orientação REAL da
+câmera naquele instante, que está certa — até `quatFim`, calculado pelo
+suporte e 180° errado. O plano **começa enquadrado e vai girando até
+terminar de costas para a casa**, mostrando céu e o relevo de fundo. É
+exatamente o relato, e explica por que "às vezes" e não "sempre".
+
+Nada corrigia isso depois: `controls.update()` — que faria
+`object.lookAt(target)` na câmera, pelo ramo certo — fica fora do laço
+enquanto `__auraCameraTravada` está ligado, que é precisamente durante a
+apresentação.
+
+Correção: `new THREE.Camera()`. Ela tem `isCamera = true`, então `lookAt`
+toma o ramo certo. Não é um `Object3D` com um comentário pedindo cuidado
+— é o tipo que já carrega a semântica.
+
+**Como o defeito apareceu.** O mesmo erro estava no validador de planos
+escrito nesta rodada, e foi ele que denunciou: o validador devolvia
+cobertura 0,000 para TODOS os planos externos e 1,000 para os dois
+internos. Zero e um, nunca um valor no meio — a assinatura de uma câmera
+girada 180°: de fora ela olha para o céu e não acerta nada; de dentro ela
+olha para a parede oposta e acerta tudo. Um instrumento quebrado do mesmo
+jeito que o código de produção é, por acidente, um bom detector.
+
+## 12.8 Duas vezes o mesmo erro de método: caixa envolvente
+
+Vale registrar porque custou duas rodadas de medição errada.
+
+**No detector de z-fighting.** A primeira versão comparava AABBs. Boa
+parte das malhas desta cena é geometria FUNDIDA — um merge por material
+junta o terraço sul com o piso do quarto — e a caixa de um merge cobre
+metade do lote. Duas malhas fundidas quaisquer "compartilham o plano
+y = 0" sem que nenhuma superfície delas esteja perto de outra. A sonda
+reportou 250 m² de faces coincidentes que não existiam.
+
+**No validador de planos.** O teste "câmera dentro de sólido" era ponto
+contra AABB. O plano "A fachada", com a câmera a 7 m ao sul da casa sobre
+o deck, era reportado como estando dentro de SEIS sólidos. Todos falsos,
+pela mesma razão.
+
+Os dois foram trocados por medidas que olham a superfície de verdade:
+rasterização dos triângulos por plano no primeiro, seis raios nos eixos
+no segundo. Depois da troca, o total de área em risco de z-fighting caiu
+de 534 723 m² (fantasia) para 15,25 m² reais, todos em faces voltadas
+para BAIXO e ocluídas pela laje logo abaixo.

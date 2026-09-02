@@ -49,8 +49,13 @@ export interface LaudoDePose {
   distanciaCentro: number | null;
   /** Câmera dentro do envelope da casa. */
   dentroDoEnvelope: boolean;
-  /** Nomes das malhas cuja caixa contém a câmera. Vazio é o esperado. */
-  dentroDeSolido: string[];
+  /**
+   * Distância até a superfície mais próxima, em metros, medida com seis
+   * raios nos eixos. Menor que ~0,15 m significa câmera encostada ou
+   * enfiada em geometria — que é o que produz "tela cheia de textura sem
+   * sentido". `null` quando nenhum dos seis raios encontra nada perto.
+   */
+  distanciaAoSolido: number | null;
 }
 
 export interface LaudoDePlano {
@@ -202,10 +207,36 @@ export function validarPlanos(
   // Caixas de mundo, calculadas UMA vez: o teste "câmera dentro de
   // sólido" faz 16 consultas e recomputar a caixa a cada uma seria
   // dezenas de milhares de traversals.
-  const caixas = alvos.map((m) => {
-    const b = new THREE.Box3().setFromObject(m, true);
-    return { nome: m.name || m.geometry.type, b };
-  }).filter((c) => isFinite(c.b.min.x));
+  // ------------------------------------------------------------
+  // POR QUE O TESTE "CÂMERA DENTRO DE SÓLIDO" NÃO PODE SER POR CAIXA
+  //
+  // A primeira versão testava o ponto contra a AABB de cada malha. Numa
+  // cena com geometria FUNDIDA isso não significa nada: um merge por
+  // material junta o terraço sul com o piso do quarto, e a caixa
+  // resultante cobre metade do lote. O plano "A fachada", com a câmera a
+  // 7 m ao sul da casa, sobre o deck, era reportado como estando dentro
+  // de SEIS sólidos. Todos falsos.
+  //
+  // Seis raios nos eixos medem o que a pergunta queria: quão perto está
+  // a superfície mais próxima. É a mesma lição do detector de
+  // z-fighting — caixa envolvente não descreve geometria fundida.
+  // ------------------------------------------------------------
+  const EIXOS = [
+    new THREE.Vector3(1, 0, 0), new THREE.Vector3(-1, 0, 0),
+    new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, -1, 0),
+    new THREE.Vector3(0, 0, 1), new THREE.Vector3(0, 0, -1),
+  ];
+  const sonda = new THREE.Raycaster();
+  sonda.far = 3;
+  const distanciaAoSolido = (pos: THREE.Vector3): number | null => {
+    let menor = Infinity;
+    for (const d of EIXOS) {
+      sonda.set(pos, d);
+      const h = sonda.intersectObjects(alvos, false);
+      if (h.length > 0 && h[0].distance < menor) menor = h[0].distance;
+    }
+    return isFinite(menor) ? +menor.toFixed(3) : null;
+  };
 
   const cam = camModelo.clone();
   const laudos: LaudoDePlano[] = [];
@@ -262,9 +293,7 @@ export function validarPlanos(
       raio.setFromCamera(ndc, cam);
       const centro = raio.intersectObjects(alvos, false);
 
-      const solidos = caixas
-        .filter((c) => c.b.containsPoint(pos))
-        .map((c) => c.nome).slice(0, 6);
+      const perto = distanciaAoSolido(pos);
 
       const pose: LaudoDePose = {
         onde, pos: [+pos.x.toFixed(2), +pos.y.toFixed(2), +pos.z.toFixed(2)],
@@ -272,7 +301,7 @@ export function validarPlanos(
         centroNaCasa: centro.length > 0,
         distanciaCentro: centro.length > 0 ? +centro[0].distance.toFixed(2) : null,
         dentroDoEnvelope: dentroDoEnvelope(pos, 0),
-        dentroDeSolido: solidos,
+        distanciaAoSolido: perto,
       };
       laudo.poses.push(pose);
 
@@ -281,19 +310,53 @@ export function validarPlanos(
           `${onde}: só ${(pose.cobertura * 100).toFixed(1)}% do quadro é casa `
           + `(mínimo ${(COBERTURA_MINIMA * 100).toFixed(0)}%)`);
       }
-      if (!pose.centroNaCasa) {
-        laudo.problemas.push(`${onde}: o centro do quadro não encontra a casa`);
+      // O centro do quadro tem de encontrar a casa — MAS um plano pode
+      // ter assunto legítimo fora do edifício. "A piscina" mira a lâmina
+      // d'água, que é sítio e não construção: ali o centro não acerta
+      // casa nenhuma e ainda assim 68% do quadro é casa. Exigir as duas
+      // coisas reprovaria um plano correto. A regra passa a ser: ou o
+      // assunto está no centro, ou a casa domina o quadro.
+      if (!pose.centroNaCasa && pose.cobertura < 0.35) {
+        laudo.problemas.push(
+          `${onde}: o centro do quadro não encontra a casa e só `
+          + `${(pose.cobertura * 100).toFixed(0)}% do quadro é casa`);
       }
-      if (solidos.length > 0) {
-        laudo.problemas.push(`${onde}: câmera dentro de ${solidos.join(', ')}`);
+      // 0,15 m é folga de lente: `camera.near` é 0,10 m, então abaixo
+      // disso a superfície já está sendo cortada pelo plano de perto.
+      if (perto !== null && perto < 0.15) {
+        laudo.problemas.push(`${onde}: superfície a ${perto} m — câmera encostada na geometria`);
       }
       if (pos.y < 0.3) laudo.problemas.push(`${onde}: câmera a ${pos.y.toFixed(2)} m — abaixo do piso`);
     }
 
-    if (laudo.poses.length === 2
-        && laudo.poses[0].dentroDoEnvelope !== laudo.poses[1].dentroDoEnvelope) {
-      laudo.atravessaFachada = true;
-      laudo.problemas.push('partida e chegada em lados opostos da fachada: o voo atravessa parede');
+    // ------------------------------------------------------------
+    // O VOO ATRAVESSA PAREDE?
+    //
+    // A primeira versão comparava se as duas poses estavam do mesmo lado
+    // do ENVELOPE. O envelope é uma caixa alinhada aos eixos, e o
+    // terraço superior — que é ar livre — cai dentro dela: o plano "O
+    // terraço" era reprovado por um voo de 3,5 m em céu aberto.
+    //
+    // A pergunta certa não é "de que lado da caixa", é "o segmento
+    // encosta em geometria de edifício". Um raio da partida até a
+    // chegada responde isso exatamente, e custa um lançamento.
+    // ------------------------------------------------------------
+    if (laudo.poses.length === 2) {
+      const de = new THREE.Vector3(...(p.partida as [number, number, number]));
+      const para = new THREE.Vector3(...p.posicao);
+      const comp = de.distanceTo(para);
+      if (comp > 0.01) {
+        sonda.far = comp;
+        sonda.set(de, para.clone().sub(de).normalize());
+        const bate = sonda.intersectObjects(alvos, false);
+        sonda.far = 3;
+        if (bate.length > 0) {
+          laudo.atravessaFachada = true;
+          laudo.problemas.push(
+            `o voo atravessa geometria a ${bate[0].distance.toFixed(2)} m da partida `
+            + `(trecho de ${comp.toFixed(2)} m)`);
+        }
+      }
     }
 
     laudos.push(laudo);
