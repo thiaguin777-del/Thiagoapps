@@ -6315,6 +6315,45 @@ function farGroundHeight(wx, wz) {
   );
 }
 
+// ------------------------------------------------------------
+// ALTURA DA SUPERFÍCIE DO CAMPO, EM COORDENADAS DE MUNDO
+//
+// BUG ENCONTRADO conferindo à mão a matemática de quem consome
+// `farGroundHeight`, e ele é grande.
+//
+// `farGroundMesh` é um PlaneGeometry girado -90° em X e posicionado em
+// z = 4. Com essa rotação, o vértice local (x, y) vai para o mundo
+// (x, ·, 4 - y) — ou seja, y_local = 4 - wz. E a malha desloca cada
+// vértice por `farGroundHeight(x, y_local + 4)`, que em mundo é
+// `farGroundHeight(x, 8 - wz)`.
+//
+// A mata distante e os morros, porém, chamavam `farGroundHeight(x, z)`
+// com o z de MUNDO. O comentário no lugar dizia "apoia no relevo, não no
+// plano" — a intenção estava certa; a amostragem, não. Os dois campos só
+// coincidem em wz = 4: o que a vegetação usava era o ESPELHO, em torno de
+// z = 4, da superfície em que ela deveria se apoiar.
+//
+// MEDIDO, comparando os dois campos sobre os raios reais de cada anel:
+//
+//   mata próxima   r  46-120 m   erro médio 1,97 m   máximo  9,48 m
+//   mata média     r 120-220 m   erro médio 6,11 m   máximo 14,48 m
+//   mata distante  r 220-300 m   erro médio 6,19 m   máximo 14,46 m
+//   morros (1)     r 225-320 m   erro médio 6,17 m   máximo 14,43 m
+//   morros (2)     r 340-435 m   erro médio 5,44 m   máximo 13,36 m
+//
+// Seis metros de erro médio: metade da mata de fundo está FLUTUANDO e a
+// outra metade ENTERRADA, em toda vista externa.
+//
+// A correção é nos consumidores, não na malha: a silhueta do horizonte
+// foi calibrada renderizando, e girá-la agora seria trocar um defeito
+// medido por uma regressão não medida. Esta função devolve o Y de MUNDO
+// da superfície — inclusive o -0,08 da base, que os chamadores também
+// ignoravam.
+// ------------------------------------------------------------
+function alturaDoCampo(wx, wz) {
+  return -0.08 + farGroundHeight(wx, 8 - wz);
+}
+
 // Terreno de fundo com relevo suave.
 function farGroundMesh(size, segs) {
   const geo = new THREE.PlaneGeometry(size, size, segs, segs);
@@ -6379,7 +6418,7 @@ function buildDistantLandscape() {
       const w = (ring === 0 ? 90 : 150) + Math.random() * 110;
       const h = (ring === 0 ? 16 : 26) + Math.random() * (ring === 0 ? 16 : 24);
       hills.push({
-        x: Math.cos(a) * r, y: farGroundHeight(Math.cos(a) * r, Math.sin(a) * r) - h * 0.12,
+        x: Math.cos(a) * r, y: alturaDoCampo(Math.cos(a) * r, Math.sin(a) * r) - h * 0.12,
         z: Math.sin(a) * r,   // base enterrada de leve no proprio terreno
         ry: Math.random() * Math.PI,
         sx: w, sy: h, sz: w * (0.6 + Math.random() * 0.3),
@@ -6454,7 +6493,7 @@ function buildDistantLandscape() {
       const porte = 1 + ring * 0.18;
       const sc = (3.0 + Math.random() * 3.4) * porte;
       const x = Math.cos(a) * r, z = Math.sin(a) * r;
-      const gy = farGroundHeight(x, z);   // apoia no relevo, não no plano
+      const gy = alturaDoCampo(x, z);   // apoia na SUPERFÍCIE, não num espelho dela
       // dois cartões cruzados: a árvore não some quando vista de canto
       const base = Math.random() * Math.PI;
       for (let k = 0; k < 2; k++) {

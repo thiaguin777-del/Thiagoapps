@@ -30,6 +30,34 @@ export interface OpcoesParticulas {
 }
 
 // ---------------------------------------------------------------
+// SEMENTE
+// ------------------------------------------------------------
+// A cena legada já semeia cada etapa de construção — `comSementeFixa`,
+// em cena-bruta — pelo motivo escrito lá: ESTE É UM MATERIAL DE VENDA. O
+// corretor abre a casa numa reunião e abre de novo na seguinte; uma
+// maquete que muda sozinha não é uma maquete do imóvel. E sem
+// determinismo nenhum A/B de imagem é confiável, porque metade da
+// diferença entre dois quadros é o sorteio.
+//
+// As partículas escaparam disso: são criadas AQUI, fora do laço de
+// etapas semeadas, com `Math.random()` puro em onze pontos. Poeira,
+// fumaça e pássaros mudavam de posição a cada visita.
+//
+// Mesmo gerador xorshift que `AudioManager` já usa, pela mesma razão, e
+// uma semente por efeito para que mexer na fumaça não desloque a poeira.
+// ---------------------------------------------------------------
+function gerador(semente: number): () => number {
+  let x = semente >>> 0;
+  if (x === 0) x = 0x9e3779b9;
+  return () => {
+    x ^= x << 13; x >>>= 0;
+    x ^= x >>> 17;
+    x ^= x << 5; x >>>= 0;
+    return x / 4294967296;
+  };
+}
+
+// ---------------------------------------------------------------
 // POEIRA
 // ---------------------------------------------------------------
 
@@ -41,17 +69,18 @@ export function criarPoeira(
   const n = Math.round(700 * densidade);
   if (n < 20) return null;
 
+  const rnd = gerador(0x504f4549);   // "POEI"
   const geo = new THREE.BufferGeometry();
   const pos = new Float32Array(n * 3);
   const sem = new Float32Array(n * 3);
   const tam = caixa.getSize(new THREE.Vector3());
   for (let i = 0; i < n; i++) {
-    pos[i * 3 + 0] = caixa.min.x + Math.random() * tam.x;
-    pos[i * 3 + 1] = caixa.min.y + Math.random() * tam.y;
-    pos[i * 3 + 2] = caixa.min.z + Math.random() * tam.z;
-    sem[i * 3 + 0] = Math.random();
-    sem[i * 3 + 1] = 0.08 + Math.random() * 0.16;
-    sem[i * 3 + 2] = 0.25 + Math.random() * 0.9;
+    pos[i * 3 + 0] = caixa.min.x + rnd() * tam.x;
+    pos[i * 3 + 1] = caixa.min.y + rnd() * tam.y;
+    pos[i * 3 + 2] = caixa.min.z + rnd() * tam.z;
+    sem[i * 3 + 0] = rnd();
+    sem[i * 3 + 1] = 0.08 + rnd() * 0.16;
+    sem[i * 3 + 2] = 0.25 + rnd() * 0.9;
   }
   geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
   geo.setAttribute('casaAura_semente', new THREE.BufferAttribute(sem, 3));
@@ -95,15 +124,16 @@ export function criarFumaca(
   const n = Math.round(70 * densidade);
   if (n < 10) return null;
 
+  const rnd = gerador(0x46554d41);   // "FUMA"
   const geo = new THREE.BufferGeometry();
   const pos = new Float32Array(n * 3);
   const sem = new Float32Array(n * 2);
   for (let i = 0; i < n; i++) {
-    pos[i * 3 + 0] = origem.x + (Math.random() - 0.5) * 0.22;
+    pos[i * 3 + 0] = origem.x + (rnd() - 0.5) * 0.22;
     pos[i * 3 + 1] = origem.y;
-    pos[i * 3 + 2] = origem.z + (Math.random() - 0.5) * 0.22;
-    sem[i * 2 + 0] = Math.random();
-    sem[i * 2 + 1] = 0.6 + Math.random() * 0.7;
+    pos[i * 3 + 2] = origem.z + (rnd() - 0.5) * 0.22;
+    sem[i * 2 + 0] = rnd();
+    sem[i * 2 + 1] = 0.6 + rnd() * 0.7;
   }
   geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
   geo.setAttribute('casaAura_semente', new THREE.BufferAttribute(sem, 2));
@@ -156,6 +186,7 @@ export function criarPassaros(
   g.userData.tipo = 'passaros';
 
   // Uma asa: dois triângulos espelhados, com a dobra no eixo do corpo.
+  const rnd = gerador(0x50415353);   // "PASS"
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array([
     0, 0, 0, -0.5, 0, -0.28, -0.5, 0, 0.28,
@@ -189,7 +220,7 @@ export function criarPassaros(
 
   for (let i = 0; i < n; i++) {
     const m = new THREE.Mesh(geo, mat);
-    m.scale.setScalar(1.3 + Math.random() * 0.7);
+    m.scale.setScalar(1.3 + rnd() * 0.7);
     // Formação em V: o deslocamento lateral cresce com a distância do
     // líder, e o atraso ao longo da curva também.
     const fila = Math.ceil(i / 2);
