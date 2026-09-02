@@ -266,6 +266,11 @@ async function principal(): Promise<void> {
       // apresentação rodando pelo botão de verdade — coordenadas num
       // arquivo provam o roteiro, não provam o modo.
       const malhas = malhasDeEdificio(casa, cena.pointInEnvelope!);
+      // O diretor, para o teste de trajetória. Ver o comentário de
+      // `CameraDirector.estado`: sem isto, validar o percurso de um plano
+      // exigiria onze minutos de relógio por plano nesta máquina.
+      const { diretor } = await import('./core/CameraDirector');
+      (w as unknown as { __auraDiretor?: unknown }).__auraDiretor = diretor;
       w.__auraMedirEnquadramento = () => ({
         ...medirEnquadramento(cena.camera, malhas),
         malhasDeEdificio: malhas.length,

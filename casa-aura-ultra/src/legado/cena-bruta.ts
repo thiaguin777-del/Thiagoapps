@@ -7644,7 +7644,36 @@ function animate() {
   const dt = Math.min(clock.getDelta(), 0.1);
   const time = clock.getElapsedTime();
 
-  if (Experience.is('cinematic') || Experience.is('presenting')) {
+  // ------------------------------------------------------------
+  // DOIS DONOS DA MESMA CÂMERA
+  //
+  // `lerpCam()` puxa a câmera para `targetCamPos`, que é o destino de
+  // CAPÍTULO do legado. Enquanto o CameraDirector tipado conduz — Modo
+  // Apresentação — ele escreve a posição na curva dele. Os dois rodam no
+  // mesmo quadro: `lerpCam` no topo, o diretor no gancho de antes do
+  // render. O diretor escreve depois, então na maioria dos quadros ele
+  // ganha e o conflito passa despercebido.
+  //
+  // Menos num caso, e é o que importa: durante o CORTE. O diretor
+  // devolve cedo enquanto o fade de 300 ms roda, e nesses quadros
+  // `lerpCam` fica como único dono — arrastando a câmera para longe da
+  // pose que o corte acabou de compor. O fade abre num enquadramento
+  // que já saiu do lugar.
+  //
+  // A trava que já existe para `controls.update()` serve aqui pelo mesmo
+  // motivo, e distingue o caso certo: o modo cinemático HERDADO usa
+  // `lerpCam` de propósito e não liga a trava; só o diretor tipado liga.
+  // ------------------------------------------------------------
+  // A trava vem PRIMEIRO, e não como condição do primeiro ramo: se ela
+  // apenas desqualificasse o ramo de cinematic/presenting, o quadro
+  // cairia no ramo seguinte quando `chapterCamMove` estivesse ligado —
+  // o cliente que clica um capítulo e em seguida aperta "Apresentação"
+  // deixa essa bandeira acesa — e ali `lerpCam` roda igual, ainda por
+  // cima devolvendo `controls.enabled = true` no meio do filme.
+  if (window.__auraCameraTravada) {
+    // O diretor tipado é o dono da câmera neste quadro. Nenhum voo
+    // herdado escreve nela.
+  } else if (Experience.is('cinematic') || Experience.is('presenting')) {
     lerpCam(dt);
   } else if (revealCamMove || chapterCamMove) {
     lerpCam(dt);

@@ -182,6 +182,29 @@ export class CameraDirector {
   }
 
   /**
+   * Estado interno, para inspeção. Existe por uma razão concreta: o
+   * ambiente de desenvolvimento não tem GPU e roda a ~0,1 quadro por
+   * segundo, e `animate()` limita `dt` a 0,1 s por quadro. Um plano de
+   * sete segundos precisaria de setenta quadros, ou seja onze MINUTOS de
+   * relógio — qualquer teste da trajetória feito esperando o filme rodar
+   * mede o relógio, não o diretor.
+   *
+   * Com `atualizar(dt)` público e este estado legível, um teste percorre
+   * o filme inteiro em milissegundos, sem desenhar nada, e mede o erro de
+   * mira e o enquadramento em cada ponto do percurso.
+   */
+  get estado(): {
+    indice: number; rodando: boolean; emCorte: boolean;
+    decorrido: number; duracao: number; esperando: number;
+  } {
+    return {
+      indice: this.indice, rodando: this.rodando, emCorte: this.emCorte,
+      decorrido: +this.decorrido.toFixed(3), duracao: this.duracao,
+      esperando: +this.esperando.toFixed(3),
+    };
+  }
+
+  /**
    * Assume a câmera e reproduz a sequência. Desliga o OrbitControls
    * enquanto dura: dois donos do mesmo transform brigam a cada quadro e o
    * resultado é tremor.
