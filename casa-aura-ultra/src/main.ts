@@ -135,36 +135,80 @@ async function principal(): Promise<void> {
   // Isso não aparece em média de FPS nenhuma. Aparece como travadinha, e
   // travadinha é o defeito que o cliente relatou.
   //
-  // `compileAsync` usa KHR_parallel_shader_compile quando o driver tem, e
-  // cai para compilação síncrona quando não tem — nos dois casos aqui, na
-  // tela de carregamento, que é onde uma espera é esperada.
+  // POR QUE NÃO `compileAsync` COM CORRIDA CONTRA UM RELÓGIO
+  // Foi a primeira tentativa, e ela MEDIDAMENTE não funciona:
+  // `compileAsync` chama `compile()` de forma SÍNCRONA e só depois
+  // devolve uma Promise que espera o driver reportar "pronto". Sem a
+  // extensão KHR_parallel_shader_compile o trabalho todo acontece
+  // dentro da chamada, com a thread travada — e um `Promise.race`
+  // contra `setTimeout` nunca chega a ser avaliado. Medido aqui:
+  // 58 -> 99 programas em 37,6 s, com um teto declarado de 9 s. O teto
+  // era decorativo.
   //
-  // Com corrida contra um teto de tempo: num aparelho fraco a compilação
-  // inteira pode passar de dez segundos, e travar o carregamento seria
-  // trocar um defeito por outro pior. O que não compilar aqui compila
-  // no caminho, como antes — nunca fica pior que o estado anterior.
+  // Em vez disso, a compilação vai em PEDAÇOS. `renderer.compile` aceita
+  // uma cena de objetos e uma cena-alvo separada de onde tirar luzes,
+  // ambiente e névoa — então dá para compilar um punhado de objetos por
+  // vez, com as luzes certas, cedendo um quadro entre os pedaços. O
+  // orçamento passa a ser real: quando estoura, o que faltou compila no
+  // caminho, como antes. Nunca fica pior que o estado anterior, e a tela
+  // de carregamento continua animando.
+  //
+  // A ordem é do mais perto da câmera inicial para o mais longe: se o
+  // orçamento estourar, o que sobrou de fora é o que aparece por último.
   // ------------------------------------------------------------
   try {
-    const r = cena.renderer as {
+    const r = cena.renderer as unknown as {
       info: { programs?: unknown[] };
-      compile: (s: unknown, c: unknown) => void;
-      compileAsync?: (s: unknown, c: unknown) => Promise<unknown>;
+      compile: (s: unknown, c: unknown, alvo?: unknown) => unknown;
     };
-    const antes = r.info.programs?.length ?? 0;
     const t0 = performance.now();
-    if (typeof r.compileAsync === 'function') {
-      await Promise.race([
-        r.compileAsync(cena.scene, cena.camera),
-        new Promise((res) => setTimeout(res, 9000)),
-      ]);
-    } else {
-      r.compile(cena.scene, cena.camera);
+    const antes = r.info.programs?.length ?? 0;
+
+    // Tipo estrutural em vez de importar `three` aqui: main.ts é o
+    // ponto de entrada e não precisa da biblioteca inteira no escopo
+    // para percorrer um grafo.
+    type Obj = {
+      material?: unknown;
+      getWorldPosition: (v: { distanceToSquared: (o: unknown) => number }) => unknown;
+    };
+    const comMaterial: Obj[] = [];
+    cena.scene.traverse((o: unknown) => {
+      if ((o as Obj).material) comMaterial.push(o as Obj);
+    });
+    const olho: unknown = cena.camera.position;
+    const centro = cena.camera.position.clone() as {
+      distanceToSquared: (o: unknown) => number;
+    };
+    comMaterial.sort((a, b) => {
+      a.getWorldPosition(centro);
+      const da = centro.distanceToSquared(olho);
+      b.getWorldPosition(centro);
+      return da - centro.distanceToSquared(olho);
+    });
+
+    const ORCAMENTO_MS = 6000;
+    const PEDACO = 8;
+    let compilados = 0;
+    for (let i = 0; i < comMaterial.length; i += PEDACO) {
+      if (performance.now() - t0 > ORCAMENTO_MS) break;
+      const pedaco = comMaterial.slice(i, i + PEDACO);
+      // Objeto com cara de cena: `compile` só chama `traverse` e
+      // `traverseVisible` nele. Evita reparentar nada — mexer no grafo
+      // real para compilar seria trocar um risco por outro.
+      const falsaCena = {
+        traverse: (fn: (o: Obj) => void) => { for (const o of pedaco) fn(o); },
+        traverseVisible: (fn: (o: Obj) => void) => { for (const o of pedaco) fn(o); },
+      };
+      r.compile(falsaCena, cena.camera, cena.scene);
+      compilados += pedaco.length;
+      await new Promise((res) => requestAnimationFrame(() => res(null)));
     }
+    const ms = performance.now() - t0;
     const depois = r.info.programs?.length ?? 0;
-    console.info(`[preaquecimento] ${antes} -> ${depois} programas em `
-      + `${(performance.now() - t0).toFixed(0)} ms`);
+    console.info(`[preaquecimento] ${antes} -> ${depois} programas | `
+      + `${compilados}/${comMaterial.length} objetos | ${ms.toFixed(0)} ms`);
     (window as unknown as { __auraPreaquecimento?: unknown }).__auraPreaquecimento =
-      { antes, depois, ms: +(performance.now() - t0).toFixed(1) };
+      { antes, depois, objetos: comMaterial.length, compilados, ms: +ms.toFixed(1) };
   } catch (e) {
     console.warn('Casa Aura: pré-compilação falhou, seguindo sem ela', e);
   }
