@@ -158,13 +158,15 @@ function mostrarConvite(aoAceitar: () => void): void {
 }
 
 export function abrirWhatsApp(mensagem: string): void {
-  const numero = (window as unknown as { CASA_AURA_WHATSAPP?: string }).CASA_AURA_WHATSAPP
+  const raw = import.meta.env.VITE_CASA_AURA_WHATSAPP
+    || (window as unknown as { CASA_AURA_WHATSAPP?: string }).CASA_AURA_WHATSAPP
     || new URLSearchParams(location.search).get('wa')
     || '';
-  if (!numero) {
-    console.info('[comercial] número de WhatsApp não configurado — CTA inerte');
+  const numero = String(raw).replace(/\D/g, '');
+  if (!/^\d{10,15}$/.test(numero)) {
+    console.info('[comercial] WhatsApp não configurado — defina VITE_CASA_AURA_WHATSAPP ou use ?wa=5511999999999');
     return;
   }
   const url = `https://wa.me/${numero}?text=${encodeURIComponent(mensagem)}`;
-  window.open(url, '_blank', 'noopener');
+  window.open(url, '_blank', 'noopener,noreferrer');
 }
