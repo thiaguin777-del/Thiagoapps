@@ -501,3 +501,20 @@ body[data-estado="CINEMATIC"] #painel-corte { display: none; }
 body[data-modo-seguro="1"] .ui,
 body[data-modo-seguro="1"] #hero,
 body[data-modo-seguro="1"] #loader { display: none !important; }
+
+/* ------------------------------------------------------------
+   O PAINEL COMERCIAL PRECISA FICAR ACIMA DO MODO SEGURO
+
+   DEFEITO VISTO na captura do PRESENTATION_SAFE: clicar "Ver planos e
+   valores" mudava o estado para COMMERCIAL e marcava o painel como
+   `.visible` — e nada aparecia. O `#modo-seguro` está em z-index 150 e
+   o painel comercial em 30, então o painel abria ATRÁS dele.
+
+   O teste automatizado disse "painelVisivel: true" e passou. Só a
+   imagem mostrou que o cliente não veria nada. É o motivo de a rodada
+   visual existir.
+
+   Um z-index acima resolve sem estado nenhum: nada precisa esconder ou
+   restaurar o modo seguro, e fechar o painel volta para ele sozinho.
+   ------------------------------------------------------------ */
+.commercial.visible { z-index: 220; }
