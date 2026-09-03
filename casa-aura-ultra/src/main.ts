@@ -52,6 +52,54 @@ function vigiarFallback(): void {
   obs.observe(el, { attributes: true, attributeFilter: ['class'] });
 }
 
+/**
+ * Entra no PRESENTATION_SAFE. Separado de `principal()` porque também
+ * pode ser chamado muito depois do boot — o aparelho pode aguentar os
+ * primeiros minutos e desabar quando a apresentação entra num plano
+ * interno com vidro e volumetria.
+ */
+async function entrarNoModoSeguro(motivo: string, maquina: typeof fsm): Promise<void> {
+  const { montarModoSeguro, modoSeguroAtivo } = await import('./ui/ModoSeguro');
+  if (modoSeguroAtivo()) return;
+  analytics.registrar('modo_seguro', { motivo });
+  montarModoSeguro({
+    motivo,
+    abrirComercial: () => {
+      // A jornada comercial é a mesma: o painel de planos é o do 3D.
+      const painel = document.getElementById('commercial');
+      void maquina.ir('COMMERCIAL', () => {
+        painel?.classList.add('visible');
+        painel?.scrollIntoView({ behavior: 'auto' });
+      });
+    },
+  });
+}
+
+/**
+ * O relatório que a diretriz de fechamento pede, em `?debug=1`: tier,
+ * percentis de FPS e de tempo de quadro, draw calls, triângulos, DPR,
+ * string do renderizador e o motivo da última troca de tier.
+ *
+ * Fica no console e num painel, e também em `window.__auraProtecao` para
+ * quem quiser ler de fora. Nada aqui é promessa: são leituras do
+ * aparelho de quem abriu.
+ */
+function ligarRelatorioDeDebug(p: { relatorio: () => Record<string, unknown> }): void {
+  if (!new URLSearchParams(location.search).has('debug')) return;
+  const el = document.createElement('pre');
+  el.id = 'relatorio-protecao';
+  el.style.cssText = 'position:fixed;right:8px;bottom:8px;z-index:400;margin:0;'
+    + 'padding:10px 12px;background:rgba(5,7,10,.86);color:#cfe;font:11px/1.45 ui-monospace,monospace;'
+    + 'border-radius:8px;max-width:46vw;white-space:pre-wrap;pointer-events:none';
+  document.body.appendChild(el);
+  window.setInterval(() => {
+    const r = p.relatorio();
+    el.textContent = Object.entries(r)
+      .map(([k, v]) => `${k.padEnd(14)} ${typeof v === 'object' ? JSON.stringify(v) : String(v)}`)
+      .join('\n');
+  }, 1000);
+}
+
 async function principal(): Promise<void> {
   document.body.dataset.estado = fsm.atual();   // LOADING
   marco('inicio');
@@ -352,7 +400,68 @@ async function principal(): Promise<void> {
   w.__auraPorQuadro = w.__auraPorQuadro || [];
   w.__auraPorQuadro.push(() => qualidade.quadro());
 
+  // ------------------------------------------------------------
+  // PROTEÇÃO DE APRESENTAÇÃO — o governador de três tiers
+  //
+  // Vem DEPOIS do auto-scaler e o supera em autoridade: o auto-scaler
+  // resolve o aparelho que está quase dando conta; o governador decide
+  // se vale a pena continuar tentando. Quando ele manda para
+  // PRESENTATION_SAFE, o laço de render para e a jornada comercial
+  // continua por outro meio.
+  //
+  // A sonda usa o contexto WebGL de VERDADE, já criado — não um
+  // contexto de teste. Um contexto extra só para sondar consome um dos
+  // poucos que o navegador concede, e num aparelho fraco isso é caro.
+  // ------------------------------------------------------------
+  const { protecao } = await import('./core/ProtecaoDeApresentacao');
+  protecao.sondar(cena.contextoWebGL());
+  protecao.aoTrocarTier = (tier, motivo) => {
+    analytics.registrar('tier', { tier, motivo });
+    if (tier === 'PRESENTATION_SAFE') void entrarNoModoSeguro(motivo, fsm);
+  };
+  const forcado = new URLSearchParams(location.search).get('tier');
+  protecao.ligar({
+    pixelRatio: (v) => cena.renderer.setPixelRatio(
+      Math.max(0.4, Math.min(v, window.devicePixelRatio || 1))),
+    sombras: (on) => cena.controlarSombras(on),
+    posProcessamento: (on) => cena.controlarPosProcessamento(on),
+    antialias: (on) => cena.controlarAntialias(on),
+    decoracao: (on) => cenaAura.modoLeve(!on),
+    transmissao: (on) => cena.controlarTransmissao(on),
+    toneMappingSimples: (on) => cena.controlarToneMappingSimples(on),
+    estatisticas: () => cena.estatisticasDoQuadro(),
+    renderizar: (on) => (on ? cena.resumeRenderLoop() : cena.pauseRenderLoop()),
+  }, forcado === 'REALTIME' || forcado === 'COMPATIBILITY'
+     || forcado === 'PRESENTATION_SAFE' ? forcado : undefined);
+  w.__auraPorQuadro.push(() => protecao.quadro());
+  (window as unknown as { __auraProtecao?: unknown }).__auraProtecao = protecao;
+
+  // ------------------------------------------------------------
+  // O LAÇO DORME QUANDO NINGUÉM ESTÁ VENDO
+  //
+  // Três situações em que desenhar é desperdício puro: aba oculta,
+  // painel comercial aberto por cima da cena, e modo seguro. O legado já
+  // tratava a aba; as outras duas não.
+  //
+  // Num celular isso é bateria, e bateria é o que decide se a segunda
+  // demonstração do dia ainda roda.
+  // ------------------------------------------------------------
+  const painelComercial = document.getElementById('commercial');
+  const reavaliarSono = () => {
+    const escondido = document.hidden;
+    const comercialAberto = !!painelComercial?.classList.contains('visible');
+    const seguro = protecao.tier === 'PRESENTATION_SAFE';
+    if (escondido || comercialAberto || seguro) cena.pauseRenderLoop();
+    else cena.resumeRenderLoop();
+  };
+  document.addEventListener('visibilitychange', reavaliarSono);
+  if (painelComercial) {
+    new MutationObserver(reavaliarSono)
+      .observe(painelComercial, { attributes: true, attributeFilter: ['class'] });
+  }
+
   ligarBotoesDoHero(cena);
+  ligarRelatorioDeDebug(protecao);
   await ligarAudio(cena);
   registrarServiceWorker();
   marco('pronto');

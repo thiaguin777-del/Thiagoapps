@@ -1597,11 +1597,19 @@ const VignetteShader = {
 // ============================================================
 const ColorGradeShader = {
   uniforms: { tDiffuse: { value: null }, saturation: { value: 1.08 }, contrast: { value: 1.12 },
-              warmth: { value: 0.3 }, lift: { value: 0.012 }, exposure: { value: 1.0 } },
+              warmth: { value: 0.3 }, lift: { value: 0.012 }, exposure: { value: 1.0 },
+              // Tier COMPATIBILITY troca ACES por Reinhard. Não é sobre
+              // custo de ALU — ACES aproximado são seis operações e não
+              // move ponteiro nenhum. É sobre PRECISÃO: com o alvo do
+              // composer em meia precisão e o pixel ratio em 0,6, a
+              // curva de ACES exagera banda no céu, e Reinhard degrada
+              // de forma mais mansa. Ver ProtecaoDeApresentacao.
+              tmSimples: { value: 0.0 } },
   vertexShader: VignetteShader.vertexShader,
   fragmentShader: [
     'uniform sampler2D tDiffuse; uniform float saturation; uniform float contrast;',
-    'uniform float warmth; uniform float lift; uniform float exposure; varying vec2 vUv;',
+    'uniform float warmth; uniform float lift; uniform float exposure;',
+    'uniform float tmSimples; varying vec2 vUv;',
     'void main(){ vec3 c=texture2D(tDiffuse,vUv).rgb;',
     // exposição sobre o valor LINEAR, que é o único ponto em que ela
     // significa "quanta luz entrou"
@@ -1609,7 +1617,9 @@ const ColorGradeShader = {
     // ACES aproximado (Narkowicz 2015) — a mesma curva que o Three.js
     // aplicaria se o composer não estivesse no meio. É ela que faz o
     // realce ROLAR para o branco em vez de bater no teto.
-    'c = clamp((c*(2.51*c+0.03))/(c*(2.43*c+0.59)+0.14), 0.0, 1.0);',
+    'vec3 aces = clamp((c*(2.51*c+0.03))/(c*(2.43*c+0.59)+0.14), 0.0, 1.0);',
+    'vec3 reinhard = clamp(c/(c+1.0), 0.0, 1.0);',
+    'c = mix(aces, reinhard, tmSimples);',
     // daqui para baixo c está em 0..1 e o grade opera como sempre operou
     'c = c + lift*(1.0-c);',
     'c = (c-0.5)*contrast+0.5;',
@@ -8082,6 +8092,94 @@ export { init, showFallback, Experience, Quality, Perf, CONFIG, goToChapter,
 // "a camera nao treme" sem GPU.
 // ------------------------------------------------------------
 export { clampFreeCamera, pointInEnvelope, HOUSE_ENVELOPE };
+
+// ------------------------------------------------------------
+// CONTROLES QUE A PROTEÇÃO DE APRESENTAÇÃO PRECISA
+//
+// O governador de tiers (`core/ProtecaoDeApresentacao`) precisa poder
+// desligar, um a um, tudo que custa por pixel — e precisa poder PARAR o
+// laço de render quando o tier vira PRESENTATION_SAFE. Nada disso era
+// alcançável de fora.
+//
+// São controles, não configuração: cada um faz uma coisa e é reversível.
+// Quem decide QUANDO usar é o governador; este arquivo só sabe COMO.
+// ------------------------------------------------------------
+export { pauseRenderLoop, resumeRenderLoop };
+
+/** Sombras do rig principal, sem recriar o mapa. */
+export function controlarSombras(ligado) {
+  if (!renderer) return;
+  renderer.shadowMap.enabled = ligado;
+  if (sunLight) sunLight.castShadow = ligado;
+  // Materiais precisam recompilar quando a sombra some, senão a cena
+  // continua amostrando um mapa que não é mais escrito.
+  scene.traverse((o) => {
+    const m = o.material;
+    if (!m) return;
+    for (const mm of (Array.isArray(m) ? m : [m])) if (mm) mm.needsUpdate = true;
+  });
+}
+
+/** Passes caros do composer. O de grade e o de vinheta ficam: são baratos. */
+export function controlarPosProcessamento(ligado) {
+  if (gtaoPass) gtaoPass.enabled = ligado;
+  if (bloomPass) bloomPass.enabled = ligado;
+}
+
+/** Amostras de MSAA nos alvos do composer. */
+export function controlarAntialias(ligado) {
+  if (!composer) return;
+  for (const alvo of [composer.renderTarget1, composer.renderTarget2]) {
+    if (!alvo) continue;
+    const novo = ligado ? 4 : 0;
+    if (alvo.samples === novo) continue;
+    alvo.samples = novo;
+    alvo.dispose();
+  }
+}
+
+/**
+ * Transmissão do vidro. `transmission > 0` obriga o Three.js a renderizar
+ * a cena num alvo separado para refratar — é o efeito mais caro por
+ * pixel da casa inteira. Desligado, o vidro vira translúcido comum.
+ */
+export function controlarTransmissao(ligado) {
+  if (!glassMaterial) return;
+  if (ligado) {
+    if (glassMaterial.__transmissaoOriginal !== undefined) {
+      glassMaterial.transmission = glassMaterial.__transmissaoOriginal;
+    }
+  } else {
+    if (glassMaterial.__transmissaoOriginal === undefined) {
+      glassMaterial.__transmissaoOriginal = glassMaterial.transmission;
+    }
+    glassMaterial.transmission = 0;
+    glassMaterial.opacity = 0.34;
+    glassMaterial.transparent = true;
+  }
+  glassMaterial.needsUpdate = true;
+}
+
+/** Tone mapping simples no passe de grade, em vez de ACES. */
+export function controlarToneMappingSimples(ligado) {
+  if (!gradePass || !gradePass.uniforms || !gradePass.uniforms.tmSimples) return;
+  gradePass.uniforms.tmSimples.value = ligado ? 1 : 0;
+}
+
+/** Estatísticas do último quadro desenhado. */
+export function estatisticasDoQuadro() {
+  if (!renderer) return { draws: 0, triangulos: 0, programas: 0 };
+  return {
+    draws: renderer.info.render.calls,
+    triangulos: renderer.info.render.triangles,
+    programas: renderer.info.programs ? renderer.info.programs.length : 0,
+  };
+}
+
+/** O contexto WebGL cru, para a sonda de hardware. */
+export function contextoWebGL() {
+  try { return renderer ? renderer.getContext() : null; } catch (e) { return null; }
+}
 
 // ------------------------------------------------------------
 // O QUE O LEGADO SABE SOBRE ATRAVESSAR PAREDE

@@ -422,3 +422,82 @@ body[data-estado="CINEMATIC"] #painel-corte { display: none; }
   }
   body[data-corte="1"] #painel-corte { transform: translateX(0) translateY(0); }
 }
+
+/* ============================================================
+   PRESENTATION_SAFE — a apresentação sem 3D
+   ------------------------------------------------------------
+   Cobre a tela inteira porque o canvas por baixo está parado: deixá-lo
+   aparecendo seria mostrar um quadro congelado, que é exatamente o que
+   este modo existe para evitar.
+
+   Sem animação de entrada: quem chega aqui está num aparelho que já
+   provou não dar conta, e animar a chegada seria gastar quadro no
+   momento errado.
+   ============================================================ */
+#modo-seguro {
+  position: fixed; inset: 0; z-index: 150;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: clamp(12px, 2vh, 22px);
+  background: var(--bg, #0d0f12);
+  padding: clamp(16px, 3vw, 40px);
+  overflow-y: auto;
+}
+#modo-seguro .ms-quadro {
+  position: relative; width: min(100%, 1180px);
+  aspect-ratio: 16 / 9; background: #05070a;
+  border-radius: 10px; overflow: hidden;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, .55);
+}
+#modo-seguro .ms-img { width: 100%; height: 100%; object-fit: cover; display: block; }
+#modo-seguro .ms-img.ms-sem-imagem { background: linear-gradient(160deg, #14171c, #0a0c10); }
+#modo-seguro .ms-legenda {
+  position: absolute; left: 0; right: 0; bottom: 0;
+  padding: clamp(14px, 3vw, 30px);
+  background: linear-gradient(to top, rgba(5, 7, 10, .92), rgba(5, 7, 10, 0));
+  display: flex; flex-direction: column; gap: 5px;
+}
+#modo-seguro .ms-legenda strong {
+  font-family: var(--serif, Georgia, serif);
+  font-size: clamp(19px, 3.2vw, 31px); font-weight: 400; color: #f2ede4;
+}
+#modo-seguro .ms-legenda em {
+  font-style: normal; font-size: clamp(13px, 1.7vw, 15px);
+  color: rgba(242, 237, 228, .74); max-width: 62ch;
+}
+#modo-seguro .ms-barra {
+  display: flex; align-items: center; gap: 14px; flex-wrap: wrap; justify-content: center;
+}
+#modo-seguro .ms-pontos { display: flex; gap: 8px; }
+#modo-seguro .ms-ponto {
+  width: 30px; height: 4px; border: 0; padding: 0; border-radius: 2px;
+  background: rgba(242, 237, 228, .26); cursor: pointer;
+  transition: background .2s ease;
+}
+#modo-seguro .ms-ponto[aria-current="true"] { background: var(--ouro, #c9a227); }
+#modo-seguro .ms-btn {
+  width: 42px; height: 42px; border-radius: 50%;
+  border: 1px solid rgba(242, 237, 228, .22);
+  background: transparent; color: #f2ede4; font-size: 20px; cursor: pointer;
+}
+#modo-seguro .ms-contador { color: rgba(242, 237, 228, .6); font-size: 13px; min-width: 52px; text-align: center; }
+#modo-seguro .ms-acoes { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; }
+#modo-seguro .ms-nota {
+  max-width: 62ch; text-align: center;
+  font-size: 12.5px; line-height: 1.55; color: rgba(242, 237, 228, .5);
+}
+
+/* Foco visível: o modo seguro não pode ser menos acessível que a cena. */
+#modo-seguro button:focus-visible {
+  outline: 2px solid var(--ouro, #c9a227); outline-offset: 3px;
+}
+
+/* Alvos de toque confortáveis no celular. */
+@media (pointer: coarse) {
+  #modo-seguro .ms-btn { width: 48px; height: 48px; }
+  #modo-seguro .ms-ponto { height: 8px; width: 34px; }
+}
+
+/* Enquanto o modo seguro está ativo, a interface 3D não deve competir. */
+body[data-modo-seguro="1"] .ui,
+body[data-modo-seguro="1"] #hero,
+body[data-modo-seguro="1"] #loader { display: none !important; }
