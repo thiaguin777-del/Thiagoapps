@@ -38,6 +38,10 @@ function vigiarFallback(): void {
   const el = document.getElementById('fallback');
   if (!el) return;
   const entrar = async () => {
+    // A trava vem ANTES de montar: a partir daqui nenhuma transição da
+    // máquina de estados é válida, e o resto do boot não vai tentar
+    // levantar hero, hotspots e apresentação por baixo do véu.
+    fsm.travar('fallback do legado ativado');
     const { montarFallback } = await import('./ui/Fallback');
     montarFallback('fallback do legado ativado');
   };

@@ -21,6 +21,7 @@ export type Estado =
   | 'EXPLORING'
   | 'CINEMATIC'
   | 'PRESENTATION'
+  | 'FALLBACK'
   | 'COMMERCIAL';
 
 type Ouvinte = (para: Estado, de: Estado) => void;
@@ -43,6 +44,8 @@ const PERMITIDO: Record<Estado, Estado[]> = {
   CINEMATIC: ['EXPLORING', 'PRESENTATION', 'COMMERCIAL'],
   PRESENTATION: ['EXPLORING', 'COMMERCIAL'],
   COMMERCIAL: ['EXPLORING', 'HERO'],
+  // Terminal de propósito: o fallback é o fim da linha. Ver `travar()`.
+  FALLBACK: [],
 };
 
 const DURACAO_FADE = 400;
@@ -51,6 +54,8 @@ export class StateMachine {
   private estado: Estado = 'LOADING';
   private ouvintes: Ouvinte[] = [];
   private emTransicao = false;
+  /** Fim de linha: ver `travar()`. */
+  private travada = false;
   private veu: HTMLDivElement;
   /** Marca de tempo de entrada em cada estado, para a telemetria por capítulo. */
   private entrouEm = performance.now();
@@ -90,7 +95,33 @@ export class StateMachine {
    * com a tela PRETA, que é o ponto de fazer o fade: um rebuild de cena ou
    * um teleporte de câmera fica invisível.
    */
+  /**
+   * TRAVA TERMINAL — o fallback é o fim da linha.
+   *
+   * DEFEITO ENCONTRADO na matriz de boot: `showFallback` do legado
+   * mostra a tela de fallback, mas o boot do módulo tipado SEGUE em
+   * frente e chama `fsm.ir('HERO')`. Duas consequências, as duas ruins:
+   * `document.body.dataset.estado` acabava em `HERO` mesmo com o
+   * fallback na tela — dois donos escrevendo no mesmo atributo, o último
+   * ganhando por acaso de tempo — e a experiência tentava montar hero,
+   * hotspots e apresentação por baixo de um véu que diz "não deu".
+   *
+   * Uma vez em fallback não há para onde ir. `travar()` fecha a máquina.
+   */
+  travar(motivo: string): void {
+    if (this.travada) return;
+    this.travada = true;
+    this.estado = 'FALLBACK';
+    document.body.dataset.estado = 'FALLBACK';
+    console.warn(`[fsm] travada em FALLBACK: ${motivo}`);
+  }
+
+  get emFallback(): boolean {
+    return this.travada;
+  }
+
   async ir(para: Estado, durante?: () => void | Promise<void>): Promise<boolean> {
+    if (this.travada) return false;
     if (this.emTransicao) return false;
     if (para === this.estado) return false;
     if (!this.podeIr(para)) {

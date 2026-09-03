@@ -7708,6 +7708,42 @@ function setupDebugPanel() {
 // ============================================================
 // ANIMATE
 // ============================================================
+// ------------------------------------------------------------
+// GANCHOS DE EFEITO, ISOLADOS DO LAÇO
+//
+// DEFEITO ENCONTRADO na matriz de boot: `renderer.setAnimationLoop`
+// agenda o quadro seguinte DEPOIS de chamar o callback —
+// `animationLoop(time); requestId = requestAnimationFrame(...)`, nessa
+// ordem, dentro do WebGLAnimation do three. Uma exceção em qualquer
+// ponto de `animate()` impede o agendamento e MATA O LAÇO DE RENDER
+// PARA SEMPRE. A tela congela sem erro visível.
+//
+// Os ganchos são o ponto mais exposto: qualquer módulo pendura função
+// ali, e um erro num efeito decorativo — poeira, feixe volumétrico,
+// cáustica — levava a casa inteira junto. Não é aceitável que a
+// fumaça da churrasqueira possa derrubar a apresentação.
+//
+// Um gancho que estoura é REMOVIDO, não só ignorado: se ele falhou uma
+// vez por um estado inválido, vai falhar em todo quadro, e sessenta
+// exceções por segundo no console escondem o que importa. O aviso sai
+// uma vez, com o nome da lista e o erro.
+//
+// O que NÃO é embrulhado: o corpo de `animate()`. Um try/catch por cima
+// de tudo esconderia defeito de verdade no núcleo, que é onde ele tem
+// de aparecer alto.
+// ------------------------------------------------------------
+function rodarGanchos(lista, dt, rotulo) {
+  for (let i = 0; i < lista.length; i++) {
+    try {
+      lista[i](dt);
+    } catch (e) {
+      console.error('[' + rotulo + '] gancho ' + i + ' falhou e foi removido:', e);
+      lista.splice(i, 1);
+      i--;
+    }
+  }
+}
+
 function animate() {
   const dt = Math.min(clock.getDelta(), 0.1);
   const time = clock.getElapsedTime();
@@ -7873,7 +7909,7 @@ function animate() {
   // depois do render, tudo apareceria com um quadro de atraso — visivel
   // como tremor durante o modo cinematico.
   const ganchosAntes = (window as any).__auraAntesDoQuadro;
-  if (ganchosAntes) { for (let i = 0; i < ganchosAntes.length; i++) ganchosAntes[i](dt); }
+  if (ganchosAntes) rodarGanchos(ganchosAntes, dt, 'antes-do-quadro');
 
   updateReveal(dt);
   // OrbitControls.update() NAO respeita `enabled` — a checagem de
@@ -7908,7 +7944,7 @@ function animate() {
   // do legado se pendura aqui em vez de o legado importar de volta, o que
   // criaria dependencia circular.
   const ganchos = (window as any).__auraPorQuadro;
-  if (ganchos) { for (let i = 0; i < ganchos.length; i++) ganchos[i](); }
+  if (ganchos) rodarGanchos(ganchos, dt, 'por-quadro');
 
   frameCount++;
   const now = performance.now();
