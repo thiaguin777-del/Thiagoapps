@@ -208,6 +208,9 @@ let solarDragging = false;
 let raycaster = new THREE.Raycaster(), mouse = new THREE.Vector2();
 let hotspotMeshes = [];
 let waterMaterial = null, glassMaterial = null, waterNormalMap = null;
+let hillMaterial = null;
+/** Albedo do relevo ao meio-dia. `applySolarTime` caminha a partir daqui. */
+const HILL_ALBEDO_DIA = new THREE.Color(0x74856a);
 let materialCentroids = {};
 let modelBounds = null;
 let camCurve = null, camCurveT = 0, camCurveTarget = 0;
@@ -1315,6 +1318,36 @@ function applySolarTime(t) {
 
   scene.fog.color.copy(s.fog);
   scene.fog.density = s.fogD;
+
+  // ------------------------------------------------------------
+  // O RELEVO DE FUNDO PRECISA ANOITECER JUNTO
+  //
+  // DEFEITO VISTO na captura noturna, e é o mais gritante da imagem: as
+  // colinas ficam VERDES E CLARAS enquanto a casa, a mata e o céu já
+  // estão em azul profundo. Uma faixa iluminada de dia no meio de uma
+  // cena noturna quebra a noite inteira — e a noite é o quadro que mais
+  // vende esta casa.
+  //
+  // Causa: a colina é a maior superfície voltada para cima da cena, com
+  // `roughness 1` e albedo claro. Ela integra o hemisfério inteiro, e à
+  // noite a hemisférica ainda vale 0,85 com céu #44578a. Medido em
+  // rodada anterior: 7,2x mais clara que as árvores a 46-218 m que estão
+  // NA FRENTE dela.
+  //
+  // A correção não é apagar a luz — isso apagaria a cena junto. É o
+  // albedo do relevo caminhar para a cor da névoa ao anoitecer, que é o
+  // que uma encosta distante realmente faz: ela some dentro da
+  // atmosfera e vira silhueta, não fica verde.
+  //
+  // Começa a agir na blue hour (0,62) e não vai a zero: encosta noturna
+  // tem claridade residual, e um recorte preto seria o defeito oposto.
+  // ------------------------------------------------------------
+  if (hillMaterial) {
+    const t = Math.max(0, Math.min(1, (solarTime - 0.62) / 0.34));
+    const k = t * t * (3 - 2 * t);
+    hillMaterial.color.copy(HILL_ALBEDO_DIA).lerp(s.fog, k * 0.82);
+    hillMaterial.envMapIntensity = 0.18 * (1 - k * 0.7);
+  }
   sunLight.color.copy(s.sunC);
   sunLight.intensity = s.sunI;
   sunLight.position.copy(sunPositionAt(solarTime));
@@ -6464,6 +6497,9 @@ function buildDistantLandscape() {
     color: 0x74856a, roughness: 1.0, metalness: 0, envMapIntensity: 0.18,
     flatShading: false, fog: true,
   });
+  // Guardado num módulo: o relevo precisa responder à hora, e quem sabe
+  // a hora é `applySolarTime`. Ver `HILL_ALBEDO_DIA` lá.
+  hillMaterial = hillMat;
   // Esfera de baixa resolução achatada lê como encosta arredondada; o
   // icosaedro de 20 faces lia como pedra facetada.
   const hillGeo = new THREE.SphereGeometry(1, 12, 8);
