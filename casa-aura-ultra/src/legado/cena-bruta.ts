@@ -3944,16 +3944,21 @@ function buildArchitecture() {
   arch.add(base);
 
   // --- Piso térreo (ala social + ala privativa) ---
-  const floorSocial = box(13.9, 0.12, 12, M.travertino, false);
-  floorSocial.position.set(-4.15, 0.06, 0);
+  // Os pisos terminavam dentro do núcleo de pedra por 20 cm. Em ângulos
+  // internos, duas superfícies quase coplanares disputavam o depth buffer.
+  // Os limites agora encostam exatamente no núcleo, sem atravessá-lo.
+  const floorSocial = box(13.7, 0.12, 12, M.travertino, false);
+  floorSocial.position.set(-4.25, 0.06, 0);
   arch.add(floorSocial);
-  const floorPrivate = box(8, 0.12, 12, M.madeiraClara, false);
-  floorPrivate.position.set(8, 0.06, 0);
+  const floorPrivate = box(7.8, 0.12, 12, M.madeiraClara, false);
+  floorPrivate.position.set(8.1, 0.06, 0);
   arch.add(floorPrivate);
 
   // --- Ala social: paredes (norte sólida, oeste com vidro, sul toda em vidro) ---
-  const socialBackWall = box(14.2, 3.2, 0.22, M.estuque);
-  socialBackWall.position.set(-4.15, 1.6, -6.1);
+  // A parede social também invadia o núcleo em 35 cm. Alinhar a junta
+  // elimina a sobreposição de estuque e pedra que aparecia como flicker.
+  const socialBackWall = box(13.55, 3.2, 0.22, M.estuque);
+  socialBackWall.position.set(-4.215, 1.6, -6.1);
   arch.add(socialBackWall);
 
   const socialWestWall = box(0.22, 3.2, 12.2, M.estuque);
@@ -3983,8 +3988,9 @@ function buildArchitecture() {
   arch.add(stoneCore);
 
   // --- Ala privativa (suíte): paredes ---
-  const privateBackWall = box(8.2, 3.2, 0.22, M.estuque);
-  privateBackWall.position.set(8, 1.6, -6.1);
+  // A parede privativa tinha o mesmo problema no encontro com o núcleo.
+  const privateBackWall = box(7.79, 3.2, 0.22, M.estuque);
+  privateBackWall.position.set(8.095, 1.6, -6.1);
   arch.add(privateBackWall);
   const privateEastWall = box(0.22, 3.2, 12.2, M.estuque);
   privateEastWall.position.set(12.1, 1.6, 0);
@@ -7970,7 +7976,7 @@ export { init, showFallback, Experience, Quality, Perf, CONFIG, goToChapter,
          setLightMode, applySolarTime, toggleReveal,
          scene, camera, renderer, controls, composer, M, LP,
          solarTime, currentFPS, lampLights, houseGroup,
-         waterObj, sunLight, currentLightMode };
+         waterObj, sunLight, currentLightMode, pauseRenderLoop };
 
 // ------------------------------------------------------------
 // SUPERFICIE DE PROVA DA CAMERA

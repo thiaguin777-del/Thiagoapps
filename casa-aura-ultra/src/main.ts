@@ -341,6 +341,16 @@ async function principal(): Promise<void> {
       // Modo Leve prometia mais do que entregava.
       cenaAura.modoLeve(ligado);
     },
+    aoModoSeguro: (motivo) => {
+      // A planta 2D é deliberadamente independente do Three.js e continua
+      // sendo uma apresentação comercial válida em hardware incompatível.
+      // O loop WebGL é encerrado antes de montar o fallback para não deixar
+      // uma cena congelada consumindo CPU/GPU por trás da interface.
+      cena.pauseRenderLoop();
+      import('./ui/Fallback').then(({ montarFallback }) => {
+        montarFallback(motivo);
+      }).catch((erro) => console.error('[fallback] falhou', erro));
+    },
   });
 
   // Pendura o auto-scaler no laco de render do legado.

@@ -29,6 +29,8 @@ interface Alvo {
   composer: { passes: { enabled: boolean; constructor: { name: string } }[] } | null;
   /** Chamado quando o Modo Leve liga/desliga. */
   aoModoLeve?: (ligado: boolean) => void;
+  /** Fallback sem renderização 3D quando o FPS permanece crítico. */
+  aoModoSeguro?: (motivo: string) => void;
 }
 
 const JANELA_MS = 2000;
@@ -45,6 +47,7 @@ export class QualityController {
   private inicioJanela = performance.now();
   private ruins = 0;
   private criticas = 0;
+  private modoSeguro = false;
   public nivel: NivelDegradacao = 0;
   public modoLeve = false;
   public fpsAtual = 60;
@@ -58,7 +61,10 @@ export class QualityController {
     // reescrevendo o valor a partir do tier.
     (window as unknown as { __auraQualidadeAssumida?: boolean })
       .__auraQualidadeAssumida = true;
-    this.travado = new URLSearchParams(location.search).has('q');
+    const params = new URLSearchParams(location.search);
+    // `?q=low` continua permitindo fallback automático: ele é o perfil
+    // compatível, não uma ordem para manter uma cena congelada.
+    this.travado = params.has('q') && params.get('q') !== 'low';
     if (this.travado) {
       console.info('[qualidade] auto-scaler DESLIGADO por ?q= — modo auditoria');
     }
@@ -81,7 +87,10 @@ export class QualityController {
       // para a rede de segurança em vez de descer um degrau a cada 6 s
       // enquanto o cliente olha uma apresentação travada.
       this.criticas++;
-      if (this.criticas >= 2) this.ativarModoLeve();
+      if (this.criticas >= 2) {
+        if (this.modoLeve) this.ativarModoSeguro('fps crítico após Modo Leve');
+        else this.ativarModoLeve();
+      }
       return;
     }
     this.criticas = 0;
@@ -136,6 +145,13 @@ export class QualityController {
     a.aoModoLeve?.(true);
     this.registrar(3, 'Modo Leve');
     this.anunciar();
+  }
+
+  private ativarModoSeguro(motivo: string): void {
+    if (this.modoSeguro || !this.alvo) return;
+    this.modoSeguro = true;
+    this.alvo.aoModoSeguro?.(motivo);
+    this.registrar(4, motivo);
   }
 
   private anunciar(): void {
