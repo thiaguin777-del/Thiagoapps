@@ -70,7 +70,11 @@ const BuildTrace = {
 // construção correspondente realmente colocou na cena.
 // ============================================================
 const CONFIG = {
-  whatsappThiago: "5561900000000", // placeholder — CTA auto-hides until replaced with a real number
+  // O contato nunca fica hardcoded no bundle. Defina VITE_CASA_AURA_WHATSAPP
+  // no build, CASA_AURA_WHATSAPP no runtime, ou use ?wa=5511999999999.
+  // O placeholder histórico é tratado como ausente e o CTA permanece honesto.
+  whatsappThiago: (import.meta.env.VITE_CASA_AURA_WHATSAPP ||
+    (window as unknown as { CASA_AURA_WHATSAPP?: string }).CASA_AURA_WHATSAPP || ''),
   chapters: [],
   hotspots: [],
 };
@@ -7423,7 +7427,8 @@ function wireWhatsappCTA() {
   const p = new URLSearchParams(location.search).get('wa');
   if (p && /^\d{10,15}$/.test(p)) num = p;
 
-  if (num && num !== '5561900000000') {
+  num = String(num || '').replace(/\D/g, '');
+  if (num && /^\d{10,15}$/.test(num)) {
     wa.href = 'https://wa.me/' + num + '?text=' + encodeURIComponent('Ola, vi a experiencia da Casa Aura e gostaria de saber mais.');
     wa.style.display = '';
   } else {
