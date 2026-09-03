@@ -4263,6 +4263,27 @@ function createWallArt(w, h, toneHex) {
   return g;
 }
 
+// Aparador de entrada/sala: escala humana, portas recuadas e tampo com sombra.
+// É um único grupo compacto e fica fora do tier low para não sacrificar FPS.
+function createConsole(w = 1.6) {
+  const g = new THREE.Group();
+  const body = rbox(w, 0.58, 0.34, M.madeiraClara);
+  body.position.y = 0.42;
+  g.add(body);
+  const top = rbox(w + 0.08, 0.06, 0.40, M.stoneCore, false);
+  top.position.y = 0.73;
+  g.add(top);
+  const front = rbox(w * 0.72, 0.34, 0.018, M.cumaru, false);
+  front.position.set(0, 0.43, 0.18);
+  g.add(front);
+  for (const x of [-w * 0.38, w * 0.38]) {
+    const leg = new THREE.Mesh(sharedCyl(0.028, 0.04, 0.76, 8), M.metal);
+    leg.position.set(x, 0.38, 0);
+    g.add(leg);
+  }
+  return g;
+}
+
 function createDoorHandle() {
   const g = new THREE.Group();
   const plate = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.04, 10), M.latao);
@@ -5256,6 +5277,13 @@ function buildLivingRoom() {
   art.rotation.y = Math.PI / 2;
   g.add(art);
 
+  if (Quality.level !== 'low') {
+    const console = createConsole(1.55);
+    console.position.set(-10.82, 0.12, -2.6);
+    console.rotation.y = Math.PI / 2;
+    g.add(console);
+  }
+
   const books = createBookStack(0.32, 4);
   books.position.set(-9.0, 0.38, -0.1);
   books.rotation.y = 0.3;
@@ -5488,6 +5516,14 @@ function buildKitchen() {
     pendant.position.set(-0.4 + i * 1.6, 1.62, 0.9);
     g.add(pendant);
     collectLamps(pendant);
+  }
+
+  if (Quality.level !== 'low') {
+    for (const x of [-0.45, 0.45, 1.35]) {
+      const stool = createBarStool();
+      stool.position.set(x, 0.12, 1.92);
+      g.add(stool);
+    }
   }
 
   houseGroup.add(g);
