@@ -37,6 +37,7 @@ const FPS_RUIM = 30;
 const FPS_CRITICO = 20;
 const FPS_MODO_LEVE = 15;
 const PIXEL_RATIO_MINIMO = 0.5;
+const PIXEL_RATIO_MODO_LEVE = 0.6;
 
 export class QualityController {
   private alvo: Alvo | null = null;
@@ -129,7 +130,9 @@ export class QualityController {
     this.nivel = 3;
     const a = this.alvo;
     if (a.composer) a.composer.passes.forEach((p, i) => { if (i > 0) p.enabled = false; });
-    a.renderer.setPixelRatio(Math.min(a.renderer.getPixelRatio(), 1));
+    // Em hardware muito fraco, DPR 1 ainda pode ser caro. 0,6 reduz
+    // preenchimento aproximadamente em 64% e preserva a geometria principal.
+    a.renderer.setPixelRatio(Math.min(a.renderer.getPixelRatio(), PIXEL_RATIO_MODO_LEVE));
     a.aoModoLeve?.(true);
     this.registrar(3, 'Modo Leve');
     this.anunciar();

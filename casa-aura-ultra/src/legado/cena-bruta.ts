@@ -94,7 +94,10 @@ const QUALITY_PRESETS = {
   ultra:  { pixelRatio: Math.min(Capability.dpr, 2), shadows: true,  shadowMap: 2048, glass: 'full',   waterAnim: true  },
   high:   { pixelRatio: Math.min(Capability.dpr, 1.75), shadows: true,  shadowMap: 1024, glass: 'full',   waterAnim: true  },
   medium: { pixelRatio: Math.min(Capability.dpr, 1.5), shadows: true,  shadowMap: 512,  glass: 'simple', waterAnim: true  },
-  low:    { pixelRatio: 1,                              shadows: false, shadowMap: 0,    glass: 'simple', waterAnim: false },
+    // Tier de compatibilidade: em GPUs integradas/software, DPR 1 ainda
+  // produz quadros de 160–250 ms. A geometria permanece a mesma, mas o
+  // preenchimento cai substancialmente e evita a sensação de congelamento.
+  low:    { pixelRatio: 0.6,                            shadows: false, shadowMap: 0,    glass: 'simple', waterAnim: false  },
 };
 
 const Quality = {
