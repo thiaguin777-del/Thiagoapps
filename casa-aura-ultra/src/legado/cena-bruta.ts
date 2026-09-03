@@ -70,10 +70,21 @@ const BuildTrace = {
 // construção correspondente realmente colocou na cena.
 // ============================================================
 const CONFIG = {
-  whatsappThiago: "5561900000000", // placeholder — CTA auto-hides until replaced with a real number
+  // Contato de producao. Formato internacional, so digitos: 55 (Brasil)
+  // + 61 (DF) + celular. O 55 NAO e opcional -- `wa.me/61993666859`
+  // seria lido como Australia. Ver `core/Contato`, que normaliza.
+  whatsappThiago: "5561993666859",
   chapters: [],
   hotspots: [],
 };
+
+// O contato configurado por código é publicado num global assim que este
+// módulo é avaliado — não dentro de `wireWhatsappCTA()`. O fallback pode
+// subir ANTES de `init()` terminar (é justamente o caso em que o WebGL
+// não sobe), e se a publicação ficasse lá dentro o fallback perderia o
+// número configurado por código. Ver `core/Contato`, que é quem lê.
+window.__auraConfigLegado = { whatsappThiago: CONFIG.whatsappThiago };
+
 
 // ============================================================
 // DEVICE / CAPABILITY DETECTION + ADAPTIVE QUALITY
@@ -7416,14 +7427,34 @@ function prevCh() {
 function wireWhatsappCTA() {
   const wa = $('cta-whatsapp');
   if (!wa) return;
-  // Permite configurar o contato pela URL (?wa=5561999999999) — assim o
-  // corretor publica o arquivo com o próprio número sem editar código.
-  // Nenhum dado de contato é inventado: sem configuração, o botão some.
+  // ------------------------------------------------------------
+  // O NÚMERO VEM DE UM LUGAR SÓ
+  //
+  // Esta função tinha a própria leitura do contato (CONFIG ou ?wa=), o
+  // painel comercial tinha outra (window.CASA_AURA_WHATSAPP ou ?wa=) e o
+  // fallback tinha uma terceira (só ?wa=). Elas DISCORDAVAM: configurar
+  // por `CONFIG.whatsappThiago` acendia este botão e deixava os três
+  // CTAs de plano mortos; configurar pela variável global fazia o
+  // inverso. Agora as três consultam `core/Contato`.
+  //
+  // `CONFIG.whatsappThiago` continua sendo um caminho válido de
+  // configuração — ele é publicado para o módulo tipado logo abaixo.
+  // ------------------------------------------------------------
   let num = CONFIG.whatsappThiago;
   const p = new URLSearchParams(location.search).get('wa');
   if (p && /^\d{10,15}$/.test(p)) num = p;
+  const g = window.CASA_AURA_WHATSAPP;
+  if (!num || num === '5561900000000') {
+    if (g && /^\d{10,15}$/.test(String(g))) num = String(g);
+  }
 
-  if (num && num !== '5561900000000') {
+  if (num) num = String(num).replace(/\D/g, '');
+  // Mesma normalizacao de `core/Contato`: numero nacional ganha o 55.
+  if (num && (num.length === 10 || num.length === 11)) {
+    const ddd = Number(num.slice(0, 2));
+    if (ddd >= 11 && ddd <= 99) num = '55' + num;
+  }
+  if (num && num !== '5561900000000' && /^\d{10,15}$/.test(num)) {
     wa.href = 'https://wa.me/' + num + '?text=' + encodeURIComponent('Ola, vi a experiencia da Casa Aura e gostaria de saber mais.');
     wa.style.display = '';
   } else {

@@ -13,6 +13,7 @@
 import { gsap } from 'gsap';
 import type { StateMachine } from '../core/StateMachine';
 import { analytics } from '../core/Analytics';
+import { contatoConfigurado, desabilitarPorFaltaDeContato, linkWhatsApp } from '../core/Contato';
 
 const SEGUNDOS_ATE_CONVITE = 60;
 
@@ -92,7 +93,18 @@ export function montarComercial(fsm: StateMachine): void {
   painel.querySelectorAll<HTMLElement>('[data-alvo]').forEach((el) => obs.observe(el));
 
   // ---- CTA WhatsApp com mensagem pré-preenchida ----
+  //
+  // Sem número configurado o botão fica DESABILITADO e diz por quê. A
+  // versão anterior criava um botão com cara de funcional e o clique
+  // caía num `return` com console.info: o corretor apresentava, o
+  // cliente clicava, e não acontecia nada. É o pior modo de falhar num
+  // caminho de venda.
+  const temContato = contatoConfigurado();
   grade?.querySelectorAll<HTMLElement>('.plano-cta').forEach((b) => {
+    if (!temContato) {
+      desabilitarPorFaltaDeContato(b, 'Contato não configurado');
+      return;
+    }
     b.addEventListener('click', () => {
       const plano = b.dataset.plano || '';
       analytics.registrar('cta_plano', { plano });
@@ -158,13 +170,12 @@ function mostrarConvite(aoAceitar: () => void): void {
 }
 
 export function abrirWhatsApp(mensagem: string): void {
-  const numero = (window as unknown as { CASA_AURA_WHATSAPP?: string }).CASA_AURA_WHATSAPP
-    || new URLSearchParams(location.search).get('wa')
-    || '';
-  if (!numero) {
-    console.info('[comercial] número de WhatsApp não configurado — CTA inerte');
+  const url = linkWhatsApp(mensagem);
+  if (!url) {
+    // Não deveria ser alcançável: sem contato os botões já nascem
+    // desabilitados em `montarComercial`. Fica como rede de segurança.
+    console.warn('[comercial] CTA acionado sem contato configurado');
     return;
   }
-  const url = `https://wa.me/${numero}?text=${encodeURIComponent(mensagem)}`;
   window.open(url, '_blank', 'noopener');
 }

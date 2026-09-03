@@ -1,0 +1,62 @@
+# ============================================================
+# Casa Aura — configuração de publicação
+# ------------------------------------------------------------
+# O repositório tem o projeto numa subpasta, então `base` aponta para
+# ela e `publish` é relativo a essa base.
+#
+# O build roda `tsc --noEmit && vite build`: se o TypeScript reprovar, o
+# deploy falha em vez de publicar um artefato que não compila. É de
+# propósito — publicar mesmo assim seria transformar um erro de tipo num
+# defeito de produção.
+# ============================================================
+[build]
+  base    = "casa-aura-ultra"
+  command = "npm ci && npm run build"
+  publish = "dist"
+
+[build.environment]
+  NODE_VERSION = "22"
+
+# ------------------------------------------------------------
+# CACHE
+#
+# Os nomes de arquivo do Vite carregam hash do conteúdo: quando o
+# conteúdo muda, o nome muda. Então esses arquivos podem ser imutáveis
+# por um ano — não existe invalidação a fazer.
+#
+# O HTML é o oposto: nunca cacheado. A casa muda, e servir uma versão
+# antiga do imóvel para um cliente é a pior falha que este produto pode
+# ter. É a mesma regra que o service worker já aplica.
+# ------------------------------------------------------------
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+[[headers]]
+  for = "/index.html"
+  [headers.values]
+    Cache-Control = "no-cache, must-revalidate"
+
+[[headers]]
+  for = "/sw.js"
+  [headers.values]
+    Cache-Control = "no-cache, must-revalidate"
+
+# ------------------------------------------------------------
+# CABEÇALHOS DE SEGURANÇA
+#
+# A experiência é uma página estática que não recebe dado de ninguém.
+# Estes cabeçalhos custam zero e fecham as portas óbvias.
+#
+# `Permissions-Policy` desliga o que a página não usa. Note que ela USA
+# `xr-spatial-tracking`? Não — não há WebXR aqui; se um dia houver, esta
+# linha precisa mudar junto.
+# ------------------------------------------------------------
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy        = "strict-origin-when-cross-origin"
+    Permissions-Policy     = "camera=(), microphone=(), geolocation=(), payment=(), usb=(), xr-spatial-tracking=()"
+    X-Frame-Options        = "SAMEORIGIN"

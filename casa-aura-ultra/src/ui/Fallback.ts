@@ -20,7 +20,15 @@
 // O QUE ELE NÃO É: a galeria 360° do projeto original. Uma galeria
 // precisa de panoramas, e não existe nenhum no repositório; desenhar
 // retângulos e chamar de foto seria pior que não ter. Ver o relatório.
+//
+// A ÚNICA importação permitida aqui é `core/Contato`, e ela não fere a
+// regra: é um módulo puro, sem dependência nenhuma, que só lê a URL e
+// dois globais. Não toca em WebGL, não toca na cena, e não pode falhar
+// pelo motivo que trouxe alguém até esta tela. Antes desta importação o
+// fallback lia SÓ `?wa=`, então um deploy configurado por variável de
+// ambiente perdia o contato justamente aqui — na única tela que sobrou.
 // ============================================================
+import { linkWhatsApp } from '../core/Contato';
 
 /** Envelope construído, de HOUSE_ENVELOPE na cena. Metros. */
 const CASA = { minX: -13.4, maxX: 12.4, minZ: -6.4, maxZ: 6.3 };
@@ -191,13 +199,13 @@ export function montarFallback(motivo?: string): void {
   redesenhar();
   window.addEventListener('resize', redesenhar);
 
-  // Mesmo parâmetro ?wa= que a cena usa, para o corretor publicar com o
-  // próprio número sem editar código.
-  const wa = new URLSearchParams(location.search).get('wa');
+  // Uma fonte só para o contato — ver `core/Contato`.
   const link = raiz.querySelector<HTMLAnchorElement>('#fb-whats')!;
-  if (wa && /^\d{10,15}$/.test(wa)) {
-    link.href = `https://wa.me/${wa}?text=${encodeURIComponent('Olá! Vi a Casa Aura e gostaria de saber mais.')}`;
+  const url = linkWhatsApp('Olá! Vi a Casa Aura e gostaria de saber mais.');
+  if (url) {
+    link.href = url;
     link.target = '_blank';
+    link.rel = 'noopener';
   } else {
     link.remove();
   }
