@@ -84,9 +84,9 @@
   </div>
 
   <div class="present-controls" id="present-controls">
-    <button class="pc-btn" id="btn-prev">‹</button>
-    <button class="pc-btn" id="btn-exit-present">✕</button>
-    <button class="pc-btn" id="btn-next">›</button>
+    <button class="pc-btn" id="btn-prev" aria-label="Plano anterior">‹</button>
+    <button class="pc-btn" id="btn-exit-present" aria-label="Sair da apresentação">✕</button>
+    <button class="pc-btn" id="btn-next" aria-label="Próximo plano">›</button>
   </div>
 </div>
 
@@ -95,7 +95,7 @@
 <div id="hs-label"><div class="hst"></div><div class="hsd"></div></div>
 
 <div class="commercial" id="commercial">
-  <button class="comm-close" id="comm-close">✕</button>
+  <button class="comm-close" id="comm-close" aria-label="Fechar planos e valores">✕</button>
   <div class="comm-scroll">
   <div class="comm-panel">
     <div class="comm-eyebrow">Agora imagine isso</div>
@@ -182,5 +182,10 @@
 <div id="debug-panel"></div>
 
 <script type="module" src="/src/main.ts"></script>
+
+<!-- Anúncio para leitor de tela. Mudança de capítulo, de modo e de
+     tier passam por aqui: sem isto a experiência é silenciosa para
+     quem não vê a tela mudar. `sr-only` porque é só para ser ouvido. -->
+<div id="anuncio" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></div>
 </body>
 </html>

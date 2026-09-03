@@ -518,3 +518,43 @@ body[data-modo-seguro="1"] #loader { display: none !important; }
    restaurar o modo seguro, e fechar o painel volta para ele sozinho.
    ------------------------------------------------------------ */
 .commercial.visible { z-index: 220; }
+
+/* ------------------------------------------------------------
+   ACESSIBILIDADE
+
+   `sr-only` esconde visualmente mas mantém no fluxo de leitura. Não usa
+   `display:none` nem `visibility:hidden` de propósito: os dois tiram o
+   elemento da árvore de acessibilidade, e aí o anúncio não é lido.
+   ------------------------------------------------------------ */
+.sr-only {
+  position: absolute; width: 1px; height: 1px;
+  padding: 0; margin: -1px; overflow: hidden;
+  clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+}
+
+/* Foco visível em TODO controle, não só nos do modo seguro. Um teclado
+   sem foco visível é um teclado inutilizável. */
+button:focus-visible,
+a:focus-visible,
+[role="button"]:focus-visible,
+input:focus-visible {
+  outline: 2px solid var(--ouro, #c9a227);
+  outline-offset: 3px;
+  border-radius: 3px;
+}
+
+/* Alvo de toque confortável no celular. 44 px é o mínimo que a diretriz
+   de acessibilidade da Apple e a do Google concordam. */
+@media (pointer: coarse) {
+  .pc-btn, .comm-close, .ch-dot { min-width: 44px; min-height: 44px; }
+}
+
+/* Quem pediu menos movimento recebe menos movimento, inclusive nas
+   transições de interface — não só na câmera. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

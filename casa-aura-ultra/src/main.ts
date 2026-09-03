@@ -100,6 +100,52 @@ function ligarRelatorioDeDebug(p: { relatorio: () => Record<string, unknown> }):
   }, 1000);
 }
 
+/**
+ * Anuncia uma mudança de estado para leitor de tela.
+ *
+ * Sem isto a experiência é silenciosa para quem não vê a tela mudar:
+ * trocar de capítulo, entrar em apresentação ou cair no modo seguro não
+ * produziam nenhum sinal audível. `role="status"` com `aria-live=polite`
+ * interrompe a leitura em curso o mínimo possível.
+ */
+/** O que o leitor de tela ouve em cada estado. */
+const NOME_DO_ESTADO: Record<string, string> = {
+  HERO: 'Tela inicial da Casa Aura.',
+  EXPLORING: 'Exploração livre. Use o mouse ou o toque para girar a casa.',
+  CINEMATIC: 'Modo cinemático em reprodução.',
+  PRESENTATION: 'Apresentação guiada em reprodução.',
+  COMMERCIAL: 'Planos e valores.',
+  FALLBACK: 'Visualização 3D indisponível. Planta e ficha técnica na tela.',
+};
+
+function anunciar(texto: string): void {
+  const el = document.getElementById('anuncio');
+  if (!el) return;
+  // Texto idêntico ao anterior não é reanunciado por alguns leitores.
+  // O espaço de largura zero força a mudança sem alterar o que se ouve.
+  el.textContent = el.textContent === texto ? texto + '\u200b' : texto;
+}
+
+/**
+ * `Escape` fecha o que estiver aberto, em qualquer modo.
+ *
+ * O legado já tratava `Escape` para sair da apresentação. O painel
+ * comercial não fechava com tecla nenhuma — e ele cobre a tela inteira,
+ * então quem chegou ali de teclado ficava preso.
+ */
+function ligarEscapeGlobal(maquina: typeof fsm): void {
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    const painel = document.getElementById('commercial');
+    if (painel?.classList.contains('visible')) {
+      painel.classList.remove('visible');
+      anunciar('Planos fechados.');
+      if (!maquina.emFallback) void maquina.ir('EXPLORING');
+      e.preventDefault();
+    }
+  });
+}
+
 async function principal(): Promise<void> {
   document.body.dataset.estado = fsm.atual();   // LOADING
   marco('inicio');
@@ -462,6 +508,14 @@ async function principal(): Promise<void> {
 
   ligarBotoesDoHero(cena);
   ligarRelatorioDeDebug(protecao);
+  ligarEscapeGlobal(fsm);
+  fsm.aoMudar((estado) => anunciar(NOME_DO_ESTADO[estado] ?? estado));
+  protecao.aoTrocarTier = ((anterior) => (tier, motivo) => {
+    anterior?.(tier, motivo);
+    if (tier === 'PRESENTATION_SAFE') {
+      anunciar('Apresentação em modo compatível: navegação por imagens.');
+    }
+  })(protecao.aoTrocarTier);
   await ligarAudio(cena);
   registrarServiceWorker();
   marco('pronto');
