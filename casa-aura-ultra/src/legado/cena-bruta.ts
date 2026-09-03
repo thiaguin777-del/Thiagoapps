@@ -689,11 +689,47 @@ async function init() {
   Quality.init();
   document.body.dataset.quality = Quality.level;
 
-  // Watchdog: se por qualquer motivo a construção da cena não terminar
-  // em 20s, mostra o fallback em vez de deixar a pessoa olhando pra uma
-  // barra de carregamento parada para sempre.
+  // ------------------------------------------------------------
+  // WATCHDOG POR TRAVAMENTO, NÃO POR RELÓGIO
+  //
+  // Era um `setTimeout` de 20 s: passou disso, fallback. E `showFallback`
+  // desliga `renderLoopActive` de forma definitiva — não há volta. Ou
+  // seja, a cena podia estar 90% construída, progredindo normalmente, e
+  // aos 20 s morria.
+  //
+  // MEDIDO na matriz de boot: com a CPU disputada, o boot passa de 40 s e
+  // o watchdog dispara em cenários em que NADA está errado. Num celular
+  // médio, com a geração procedural de textura que esta cena faz, 20 s é
+  // um teto plausível de ser encostado — e o resultado seria mandar para
+  // o fallback um aparelho que ia conseguir.
+  //
+  // A pergunta certa não é "demorou?", é "PAROU?". A construção publica
+  // progresso em `BuildTrace.completedSteps`; enquanto esse número anda,
+  // não há por que desistir. O que caracteriza travamento é progresso
+  // parado — e aí sim o fallback é a resposta certa.
+  //
+  // Teto absoluto continua existindo, generoso, para o caso de o
+  // progresso andar mas nunca terminar.
+  // ------------------------------------------------------------
   let initDone = false;
-  window.setTimeout(() => { if (!initDone) showFallback('init-timeout'); }, 20000);
+  const PARADO_MS = 25000;    // sem avançar uma etapa por 25 s = travado
+  const TETO_MS = 180000;     // 3 min de teto absoluto, último recurso
+  const t0Init = performance.now();
+  let ultimoProgresso = t0Init;
+  let etapasVistas = -1;
+  const vigia = window.setInterval(() => {
+    if (initDone) { window.clearInterval(vigia); return; }
+    const n = BuildTrace.completedSteps.length;
+    if (n !== etapasVistas) { etapasVistas = n; ultimoProgresso = performance.now(); }
+    const agora = performance.now();
+    if (agora - ultimoProgresso > PARADO_MS) {
+      window.clearInterval(vigia);
+      showFallback('init-travado');
+    } else if (agora - t0Init > TETO_MS) {
+      window.clearInterval(vigia);
+      showFallback('init-timeout');
+    }
+  }, 2000);
 
   clock = new THREE.Clock();
   scene = new THREE.Scene();
@@ -910,7 +946,8 @@ const FALLBACK_REASONS = {
   'webgl-init-failed':   { user: 'Não foi possível iniciar o WebGL neste navegador.', tech: 'new THREE.WebGLRenderer() lançou exceção — verificar suporte a WebGL do dispositivo.' },
   'scene-build-failed':  { user: 'A construção da cena 3D falhou.', tech: 'Erro interno da aplicação durante buildScene() — ver etapa e stack abaixo. NÃO é falta de suporte a WebGL.' },
   'init-exception':      { user: 'Ocorreu um erro ao iniciar a experiência.', tech: 'Exceção não tratada em algum ponto de init() fora de buildScene().' },
-  'init-timeout':        { user: 'O carregamento demorou mais do que o esperado.', tech: 'init() não terminou em 20s — possível travamento silencioso.' },
+  'init-travado':        { user: 'O carregamento parou de avançar.', tech: 'Nenhuma etapa de buildScene() concluída em 25s — progresso PARADO, não apenas lento.' },
+  'init-timeout':        { user: 'O carregamento demorou mais do que o esperado.', tech: 'init() passou do teto absoluto de 180s, mesmo progredindo.' },
   'context-lost':        { user: 'A conexão com a placa de vídeo foi perdida.', tech: 'Evento webglcontextlost dado como definitivo (sem restauração a tempo).' },
 };
 
