@@ -242,13 +242,50 @@ export class CasaAuraScene {
       c.Quality.level === 'medium' ? 0.3 : 0;
     if (densidade === 0) return;
 
-    // Poeira só dentro do volume da sala: é contra a luz da fachada sul
-    // que ela aparece, e é lá que ela vale o custo.
-    const caixa = new THREE.Box3(
-      new THREE.Vector3(SALA.minX, SALA.piso + 0.3, -6.0),
-      new THREE.Vector3(SALA.maxX, SALA.teto, SALA.vidroZ),
-    );
-    this.particulas.adicionar(criarPoeira(caixa, { densidade }));
+    // ------------------------------------------------------------
+    // POEIRA: DESLIGADA POR PADRÃO, E A CONTA DIZ POR QUÊ
+    //
+    // Duas rodadas de conserto e a poeira estragou uma captura de
+    // apresentação nas duas. Primeiro lia como NEVE (disco de 51 px a
+    // 1 m — quatro ordens de grandeza acima do físico). Consertados
+    // tamanho e opacidade, e acrescentado o espalhamento de Mie que
+    // faltava, o quadro do Estar ao meio-dia ficou com UM ponto.
+    //
+    // Aí veio a Cozinha no golden hour: ~40 pontos brancos sobre
+    // parede, teto e ilha. O termo de Mie não falhou — ele saturou,
+    // porque naquele capítulo a câmera olha quase para o sol e
+    // `dot(paraCamera, -sol)` fica perto de 1 no quadro inteiro.
+    //
+    // A conta que fecha o assunto. No pico de Mie uma partícula soma,
+    // em blending aditivo, `0,22 x (255,242,220)` = +56 níveis:
+    //
+    //   sobre parede ensolarada (200/255)  -> +28%, ponto branco cravado
+    //   para ficar sob o limiar de Weber
+    //   (~1%) nessa parede                 -> opacidade <= 0,008
+    //   nesse valor, sobre sombra (30/255) -> +2 niveis, invisivel
+    //
+    // Ou seja: NÃO EXISTE opacidade constante que apareça na sombra e
+    // suma na luz. Poeira real é invisível contra uma parede iluminada
+    // porque tem a mesma luminância do fundo — e um passe aditivo
+    // adiante não conhece o fundo. O modelo está errado por construção,
+    // não mal calibrado.
+    //
+    // Corrigir de verdade exige amostrar profundidade ou cor da cena por
+    // trás da partícula. Isso é plumbing de composer que não se abre na
+    // véspera de entregar, para um efeito decorativo que já custou dois
+    // dos sete quadros de apresentação.
+    //
+    // Então fica atrás de `?poeira=1`: o código e a análise permanecem
+    // vivos para quem for fazer a versão com profundidade, e o cliente
+    // não recebe sujeira de lente na cozinha.
+    // ------------------------------------------------------------
+    if (/[?&]poeira=1/.test(location.search)) {
+      const caixa = new THREE.Box3(
+        new THREE.Vector3(SALA.minX, SALA.piso + 0.3, -6.0),
+        new THREE.Vector3(SALA.maxX, SALA.teto, SALA.vidroZ),
+      );
+      this.particulas.adicionar(criarPoeira(caixa, { densidade }));
+    }
 
     // Churrasqueira da área gourmet. A coordenada é a do `grillBody` em
     // buildPoolAndDeck (pergolaX + 1,5 = 2,7 / pergolaZ = 10,4), com a

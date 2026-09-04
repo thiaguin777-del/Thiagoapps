@@ -1724,7 +1724,33 @@ const ColorGradeShader = {
     // pode empurrar um valor abaixo de zero; o lift o traz de volta,
     // porque o clamp só acontece no gl_FragColor, no fim.
     // ------------------------------------------------------------
-    'c = (c-0.5)*contrast+0.5;',
+    // O CLAMP ENTRE OS DOIS NAO E DEFENSIVO: E ELE QUE DA O PISO
+    //
+    // Inverter a ordem sozinho nao resolveu, e a ablacao mostrou por que.
+    // Medido no capitulo 8 (terraco, golden), mesmo quadro, mesma camera:
+    //
+    //   base (lift 0,0386)            ->  20,34% em L<=4,  p1 = 0
+    //   sem vinheta                   ->  20,28%   (nao e ela)
+    //   sem grao                      ->  21,08%   (o grao ate ajudava)
+    //   sem GTAO                      ->  20,44%   (nao e ele)
+    //   sem bloom                     ->  23,95%   (o bloom ajudava)
+    //   lift 0,20                     ->   0,00%,  p1 = 36
+    //
+    // Ou seja: o grade alcanca todo pixel e o lift e mesmo o controle --
+    // o valor e que passava raspando. Com contraste 1,092 (golden):
+    //
+    //   c=0 --contraste--> -0,046 --lift--> -0,046 + 0,0386*1,046
+    //                                     = -0,0056  --clamp--> 0
+    //
+    // Faltavam seis milesimos. Depender de o lift ser maior que a
+    // excursao negativa do contraste e depender de sorte: a cada ajuste
+    // de contraste a conta muda, e o preto volta sem aviso.
+    //
+    // Com o clamp aqui, o piso passa a ser IGUAL a `lift` para qualquer
+    // contraste. Perde-se separacao abaixo do cruzamento -- mas aqueles
+    // valores ja estavam sendo cortados para zero, entao nao se perde
+    // nada que se tivesse: troca-se preto morto por preto levantado.
+    'c = clamp((c-0.5)*contrast+0.5, 0.0, 1.0);',
     'c = c + lift*(1.0-c);',
     'float l=dot(c,vec3(0.299,0.587,0.114)); c=mix(vec3(l),c,saturation);',
     'c.r += warmth*0.04; c.b -= warmth*0.04;',
