@@ -79,6 +79,7 @@ Aqui você responde à pergunta dele, não segue script.
 | Tela de "não foi possível iniciar" | O aparelho não tem WebGL. **A planta 2D aparece ali mesmo** — apresente por ela, tem os ambientes e a ficha técnica. |
 | Travou no carregamento | Recarregar. Se repetir, o aparelho é fraco demais; use outro. |
 | Ficou lento no meio | Normal: a experiência baixa a qualidade sozinha. Se incomodar, recarregue. |
+| **O 3D sumiu e virou uma galeria de fotos** | **Esperado, e não é falha.** O aparelho não aguentava a taxa de quadros e a experiência trocou para o modo compatível: as mesmas fotos da casa, os mesmos capítulos, as mesmas setas, o mesmo botão de WhatsApp. **Continue a apresentação normalmente** — o cliente não perde nada da jornada, só o giro livre. Nunca recarregue no meio da demonstração para "tentar de novo": num aparelho que já caiu, vai cair de novo, agora na frente dele. |
 | Botão de WhatsApp desabilitado | Número não configurado. Passe o contato de viva-voz e resolva depois. |
 
 **O que NÃO prometer:** Casa Aura é um **projeto conceitual**. Não é um
