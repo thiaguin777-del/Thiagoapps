@@ -10,7 +10,8 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "build:unico": "vite build --config vite.config.unico.ts && node scripts/gerar-html-unico.mjs",
-    "teste:fsm": "node testes/fsm-varredura.mjs"
+    "teste:fsm": "node testes/fsm-varredura.mjs",
+    "teste:aba-escondida": "node testes/aba-escondida.mjs"
   },
   "dependencies": {
     "gsap": "^3.12.5",

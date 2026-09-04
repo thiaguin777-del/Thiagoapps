@@ -200,6 +200,7 @@ const COMPENSA_LTC = 2.9;
 let _ultimoPMREM = -1e9;
 let waterObj = null;
 let composer = null, gradePass = null, grainPass = null, bloomPass = null, gtaoPass = null, composerFailed = false;
+let vignettePass = null;
 let currentChapter = 0;
 let targetCamPos = new THREE.Vector3(), targetLookAt = new THREE.Vector3();
 let currentLightMode = 'day';
@@ -1790,7 +1791,8 @@ function setupPostProcessing() {
   }
   gradePass = new ShaderPass(ColorGradeShader);
   c.addPass(gradePass);
-  c.addPass(new ShaderPass(VignetteShader));
+  vignettePass = new ShaderPass(VignetteShader);
+  c.addPass(vignettePass);
   grainPass = new ShaderPass(FilmGrainShader);
   if (Capability.reducedMotion) grainPass.enabled = false;
   c.addPass(grainPass);
@@ -8382,3 +8384,20 @@ export { heightField, cavityField, carveCourses, pbrFromHeight, grassTexture };
 // boot em vez de um por valor — que aqui, a 0,1 quadro por segundo,
 // é a diferença entre dez minutos e dez segundos.
 export { indoorU };
+
+// ------------------------------------------------------------
+// OS PASSES DE POS-PROCESSAMENTO, PARA ABLACAO
+//
+// Mesma razao de `indoorU` logo acima: um boot custa ~10 min nesta
+// maquina sem GPU, entao testar N hipoteses sobre a imagem recarregando
+// N vezes nao e viavel. Com os passes na mao, uma corrida so consegue
+// capturar o quadro com cada passe ligado e desligado, que e a unica
+// forma honesta de dizer QUAL deles produziu um defeito -- em vez de
+// deduzir pela aparencia, que ja me fez errar duas vezes nesta base.
+//
+// Nao e API de produto: nada no aplicativo chama isto.
+// ------------------------------------------------------------
+export function passesDePos() {
+  return { grade: gradePass, vinheta: vignettePass, grao: grainPass,
+           bloom: bloomPass, gtao: gtaoPass, composer };
+}
