@@ -115,12 +115,31 @@ chega a `pronto` com `[antes-do-quadro] gancho 0 falhou e foi removido`.
 mesmo atributo. **Corrigido:** `FALLBACK` entrou no tipo `Estado` como
 terminal e `fsm.travar()` fecha a máquina antes de montar o fallback.
 
-### Defeito aberto
+### O "defeito aberto" era outro defeito
 
-**Retorno do background não recupera.** Quem abre o link numa aba de
-fundo cai no fallback e **continua nele** ao voltar. Medido:
-`aposRetorno` permanece `FALLBACK`. `PARTIAL` — o desfecho é
-determinístico e honesto, mas deveria haver recuperação.
+A rodada anterior registrou: *"retorno do background não recupera —
+quem abre o link numa aba de fundo cai no fallback e continua nele ao
+voltar"*, e propôs recuperação como conserto.
+
+A pergunta estava errada. **Não era como recuperar: era por que tinha
+ido para lá.**
+
+O vigia de boot já tinha sido consertado uma vez, trocando "demorou 20 s"
+por "parou de progredir" — a pergunta certa. Mas o relógio continuou
+sendo o de **parede**. Uma aba escondida congela o `requestAnimationFrame`
+(o navegador economizando bateria, não a cena travando), enquanto o
+`setInterval` do vigia segue rodando afunilado. Trocar de aba por 25 s
+durante o boot mandava para o fallback um aparelho perfeitamente saudável
+— e o fallback é terminal por projeto.
+
+Agora o tempo escondido é **descontado**, ancorado no instante do último
+progresso (não somado no total, senão o crédito de uma pausa antiga
+pagaria por um travamento de agora).
+
+`testes/aba-escondida.mjs` (`npm run teste:aba-escondida`) reproduz o
+cenário: esconde a aba por 40 s durante o boot e falha se cair no
+fallback. `UNTESTED` — escrito, ainda não executado até o fim nesta
+máquina, onde um boot custa cerca de dez minutos.
 
 ---
 
@@ -160,41 +179,140 @@ toque de 48 px em ponteiro grosso, e `aria-live` na legenda.
 
 ## 5. Rodada visual — capturas observadas
 
-Seis capturas geradas da cena e **efetivamente inspecionadas**. Nenhuma
+Sete capturas geradas da cena e **efetivamente inspecionadas**. Nenhuma
 afirmação visual aqui vem de inferência geométrica.
 
-| captura | veredito |
+### O instrumento foi consertado antes das imagens
+
+Duas rodadas de capturas foram invalidadas por erro meu, não do produto,
+e vale registrar porque o mesmo erro aparecia de forma diferente cada vez:
+
+1. **Câmera setada à mão para dentro do envelope** — `clampFreeCamera` a
+   expulsou, que é o guarda anti-clip funcionando. Resolvido entrando
+   pelo caminho do produto (`Experience.set('presenting')`).
+2. **`?tier=REALTIME` não era autoridade** — o governador rebaixava para
+   `PRESENTATION_SAFE` no meio da corrida, e duas capturas saíram do
+   overlay do modo seguro em vez da cena. Os dois arquivos tinham
+   exatamente 769.727 bytes: a mesma imagem. Corrigido com uma trava,
+   espelhando a que o `?q=` já tinha.
+3. **Coordenadas chutadas** — a "suíte" saiu a 4,3 m de altura, um
+   pavimento acima e do lado de fora do muro, olhando a mata. A câmera
+   obedeceu (`erro = 0`): o errado era o pedido. As horas também estavam
+   erradas (`t=0` é meio-dia, não `0,30`).
+
+A galeria agora é capturada pelas **câmeras do próprio produto**
+(`src/data/chapters.json`) e pelas **paradas solares do próprio código**
+(`SOLAR_T`), não por números meus. `erro = 0` em todas as sete.
+
+### O preto absoluto: da suspeita à medição
+
+O defeito era descrito na rodada anterior como "25–35% do quadro em preto
+absoluto na golden hour", a olho. O histograma deu o número e apontou o
+lado errado da curva:
+
+| captura | estourado (≥250 RGB) | preto absoluto (L≤4) |
+|---|---|---|
+| exterior dia | 0,00% | 3,44% |
+| interior estar | 0,00% | 3,08% |
+| golden terraço | 0,00% | **26,56%** |
+| exterior noite | 0,00% | **43,17%** |
+
+Eu tinha lido "chão estourado" na mesma imagem. **Zero por cento** dos
+pixels estavam em ≥250 nos três canais. O defeito estava todo na sombra.
+
+A causa foi encontrada por **ablação** — um boot, seis variantes do mesmo
+quadro (capítulo 8), com os passes de pós expostos por `passesDePos()`:
+
+| variante | preto absoluto | conclusão |
+|---|---|---|
+| base | 20,34% | — |
+| sem vinheta | 20,28% | **não é ela** (hipótese minha, morta) |
+| sem grão | 21,08% | o grão até **ajudava** |
+| sem GTAO | 20,44% | não é ele |
+| sem bloom | 23,95% | o bloom **ajudava** |
+| `lift = 0,20` | **0,00%**, p1 = 36 | é o lift |
+
+O `lift` rodava **antes** do contraste, que o anulava. Invertido, ainda
+passava raspando: com contraste 1,092, `c=0 → −0,046 → −0,0056 → clamp →
+0`. Faltavam seis milésimos. Um `clamp` entre os dois faz o piso ser
+igual ao `lift` para qualquer contraste — garantia, não coincidência.
+
+### Antes e depois, mesma câmera e mesma hora
+
+| captura | antes | depois | p1 depois |
+|---|---|---|---|
+| exterior dia | 3,44% | 0,58% | 6 |
+| interior estar | 3,08% | 0,58% | 11 |
+| **golden terraço** | **22,02%** | **0,00%** | 6 |
+| suíte master | — | 0,56% | 10 |
+| piscina golden | — | 0,00% | 6 |
+| cozinha | — | 0,00% | 7 |
+| **exterior noite** | **35,34%** | **0,00%** | 10 |
+
+**Ressalva honesta:** o defeito *técnico* fechou — não há mais informação
+cortada irrecuperavelmente. O defeito *perceptual* não fechou por
+completo: o piso do terraço e o deck da piscina continuam lendo como
+vazio, agora em 6–8/255 em vez de 0. Ver "Defeitos visuais" abaixo.
+
+### Confirmações positivas, com imagem
+
+| item | veredito |
 |---|---|
-| exterior dia | `VISUAL VERIFIED` — arquitetura lê, pedra com fiada, **sem z-fighting no gramado**, mata assentada no relevo |
-| golden hour terraço | `VISUAL VERIFIED` — luz quente correta; **~35% do quadro em preto absoluto** |
-| exterior noite | `VISUAL VERIFIED` — melhor quadro da série; **colina de fundo verde e clara** |
-| piscina golden | `VISUAL VERIFIED` — interior lê muito bem pelo vidro; **água verde-musgo e opaca** |
-| interior dia | **inválida** — instrumento, não produto |
-| interior noite | **inválida** — mesma causa |
+| Gramado sem z-fighting | `VISUAL VERIFIED` |
+| Mata distante assentada no relevo | `VISUAL VERIFIED` |
+| Colina de fundo escurece à noite | `VISUAL VERIFIED` — silhueta azul-escura, era verde clara |
+| Poeira fora dos interiores | `VISUAL VERIFIED` — cozinha no golden hour, o quadro que a expôs, agora limpo |
+| Suíte master pela câmera do produto | `VISUAL VERIFIED` — render vendável |
+| Piscina à noite | `VISUAL VERIFIED` — lâmina translúcida, LED de borda, fundo visível |
 
-### Confirmações positivas
+### A poeira: por que foi desligada e não recalibrada
 
-As duas correções estruturais da rodada anterior **aparecem na imagem**:
-não há linha de interseção nem cintilação no gramado, e a mata distante
-está assentada no relevo em vez de flutuar. Isso fecha, com imagem, o que
-antes era só prova numérica.
+Duas rodadas de conserto, duas capturas de apresentação estragadas.
+A conta encerra o assunto. No pico de Mie, em blending aditivo, uma
+partícula soma `0,22 × (255,242,220)` = **+56 níveis**:
 
-### As duas capturas inválidas
+- sobre parede ensolarada (200/255) → **+28%**, ponto branco cravado
+- para ficar sob o limiar de Weber (~1%) ali → opacidade ≤ **0,008**
+- nesse valor, sobre sombra (30/255) → **+2 níveis**, invisível
 
-Setei a câmera à mão para dentro do envelope e `clampFreeCamera` a
-**expulsou** — o guarda anti-clip funcionando como projetado. O interior
-só é alcançável pelo caminho do produto. É defeito da minha captura, e o
-mesmo erro de instrumento já registrado em rodada anterior.
+Não existe opacidade constante que apareça na sombra e suma na luz.
+Poeira real é invisível contra parede iluminada porque tem a luminância
+do fundo — e um passe aditivo adiante **não conhece o fundo**. O modelo
+está errado por construção, não mal calibrado. Corrigir exige amostrar
+profundidade da cena atrás da partícula. Fica atrás de `?poeira=1`.
 
 ### Defeitos visuais
 
 | # | defeito | estado |
 |---|---|---|
-| A | Colina de fundo verde e clara à noite | **corrigido**, recaptura pendente |
-| B | Água da piscina verde-musgo e opaca | ablação executada, correção pendente |
-| C | 25–35% do quadro em preto absoluto na golden hour | `ABERTO` |
-| D | Tiling visível da textura de grama | `ABERTO` |
-| E | Copas próximas leem como massa de cartões | `ABERTO` |
+| A | Colina de fundo verde e clara à noite | **CORRIGIDO**, `VISUAL VERIFIED` |
+| B | Preto absoluto em golden hour e noite | **CORRIGIDO** — 22,02%→0,00% e 35,34%→0,00% |
+| C | Poeira lendo como sujeira de lente | **CORRIGIDO** — desligada, com a conta que justifica |
+| D | Folhagem verde e iluminada à noite | **corrigido**, recaptura pendente |
+| E | Deck e piso de terraço lendo como vazio no golden hour | `ABERTO` — ver abaixo |
+| F | Piscina verde-musgo e opaca no golden hour | `ABERTO` — mesma causa que E |
+| G | Tiling visível da textura de grama | `ABERTO` |
+| H | Copas próximas leem como massa de cartões | `ABERTO` |
+
+**Sobre E e F.** A comparação com o quadro noturno corrigiu minha própria
+hipótese: **não é o material da água.** À noite o revestimento da piscina
+acende junto com as luminárias (`emissiveIntensity = 0,35 + lamp × 1,15`)
+e a lâmina lê perfeitamente translúcida. No golden hour o sol a 11° de
+elevação não alcança nem o fundo da bacia nem o deck, e a hemisférica
+sozinha (0,28) não paga a conta em superfície voltada para cima com
+albedo baixo.
+
+Isso é **fisicamente correto e comercialmente ruim**: a legenda do
+capítulo 9 vende "borda infinita, deck em ipê e área gourmet coberta", e
+no golden hour nenhum dos três aparece.
+
+### Observação de direção de arte, não defeito
+
+O capítulo 5 ("Sala de Estar") tem a legenda *"Ambiente social integrado,
+voltado para a piscina"* e a câmera olha para a parede da TV, com o vidro
+atrás dela. O cômodo **é** orientado para a piscina — só o enquadramento
+não mostra. Não mexi na sua câmera autoral; fica registrado para você
+decidir.
 
 ---
 
@@ -249,13 +367,13 @@ um UUID gerado na hora.
 | `npm run build:unico` sem erro | `DONE` |
 | Hash do artefato registrado | `DONE` |
 | Boot: cena pronta ou fallback, sem loading infinito | `DONE` — 9 de 9 cenários |
-| FSM: nenhuma transição inválida prende a interface | `PARTIAL` — varredura exaustiva não executada nesta rodada |
+| FSM: nenhuma transição inválida prende a interface | `DONE` — `npm run teste:fsm`: 42 pares exercitados + 7 propriedades, 0 falhas |
 | Câmera: todos os planos testados | `DONE` (rodada anterior) — erro de mira 0,00–0,01° nos 8 planos |
 | CTA configurado e testado | `DONE` |
 | Responsividade desktop e celular | `PARTIAL` — viewport 360×640 verificado; aparelho real não |
 | Acessibilidade: foco, teclado, Escape, labels | `PARTIAL` — feito no modo seguro; auditoria da cena 3D não executada |
 | Performance p50/p95/p99 em aparelho real | `UNMEASURED` |
-| Visual: capturas observadas e registradas | `DONE` — 4 válidas, 2 inválidas por erro de instrumento |
+| Visual: capturas observadas e registradas | `DONE` — 7 válidas pelas câmeras do produto, `erro = 0` em todas |
 | Comercial: planos e escopos aprovados | `BLOCKED` — depende da sua aprovação |
 | Fallback honesto, sem assets inexistentes | `DONE` |
 | Publicação | `BLOCKED` — `api.netlify.com` bloqueado pela rede deste ambiente |
@@ -288,9 +406,14 @@ dispositivos está **vazia** em vez de preenchida com estimativa.
    sistema de tiers foi escrito e tipa-verificado, mas o caminho
    `PRESENTATION_SAFE` nunca foi exercitado num aparelho que realmente
    desabe.
-2. **Retorno do background não recupera** da tela de fallback.
-3. **Três defeitos visuais abertos** (preto absoluto na golden hour,
-   tiling de grama, copas próximas).
+2. **Quatro defeitos visuais abertos**: deck e piso de terraço lendo como
+   vazio no golden hour, piscina verde-musgo pela mesma causa, tiling da
+   textura de grama, copas próximas lendo como massa de cartões. Os dois
+   primeiros são de **iluminação em sombra sob sol rasante**, não de
+   material — a comparação com o quadro noturno provou isso.
+3. **Os testes novos rodaram parcialmente aqui.** `teste:fsm` roda em
+   ~1 s e passou. `teste:aba-escondida` precisa de navegador e, sem GPU,
+   de cerca de dez minutos por boot: está `UNTESTED`.
 4. **Preços e escopos comerciais não aprovados** por você.
 5. **`vite`/`esbuild` com CVE** — só dev server, mas convém não expor.
 6. **Sem assets reais.** A casa é 100% procedural. É uma força (274 KB de
