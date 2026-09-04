@@ -288,11 +288,48 @@ profundidade da cena atrás da partícula. Fica atrás de `?poeira=1`.
 | A | Colina de fundo verde e clara à noite | **CORRIGIDO**, `VISUAL VERIFIED` |
 | B | Preto absoluto em golden hour e noite | **CORRIGIDO** — 22,02%→0,00% e 35,34%→0,00% |
 | C | Poeira lendo como sujeira de lente | **CORRIGIDO** — desligada, com a conta que justifica |
-| D | Folhagem verde e iluminada à noite | **corrigido**, recaptura pendente |
+| D | Folhagem verde e iluminada à noite | **corrigido com moderação** — ver abaixo |
 | E | Deck e piso de terraço lendo como vazio no golden hour | `ABERTO` — ver abaixo |
 | F | Piscina verde-musgo e opaca no golden hour | `ABERTO` — mesma causa que E |
 | G | Tiling visível da textura de grama | `ABERTO` |
 | H | Copas próximas leem como massa de cartões | `ABERTO` |
+
+**Sobre D, a folhagem noturna.** O defeito era real: no capítulo 13
+("Visão Final", o último quadro que o cliente vê) a fileira de árvores da
+encosta lia verde e iluminada contra um céu azul-escuro. A causa está nos
+presets e é deliberada — a noite usa `hemiI` 0,85, quase **três vezes** o
+dia (0,3), sem o que a cena noturna fecha em preto.
+
+A primeira correção foi longe demais. Com queda de albedo de 0,66 a
+folhagem **sumiu por completo** e a casa ficou flutuando num vazio sem
+sítio. Isso não é conserto: é outro defeito, e num quadro que se chama
+"Visão Final" é pior, porque o terreno faz parte do que se vende.
+
+A varredura de calibração (um boot, quatro valores, pelo mesmo mecanismo
+de `window.__RECT_K` que já existia no arquivo):
+
+| escuro / dessat / env | resultado |
+|---|---|
+| 0 / 0 / 0 (controle) | árvores verdes e iluminadas — o defeito |
+| 0,30 / 0,35 / 0,10 | folhagem **quase sumiu** |
+| 0,45 / 0,45 / 0,20 | folhagem sumiu; casa num vazio |
+
+Duas coisas que a varredura ensinou:
+
+1. **A curva é brutalmente sensível** — entre "verde demais" e "não
+   existe" há menos de 0,3 de parâmetro. Faz sentido: à noite o quadro
+   inteiro tem `p50 = 16/255`, então qualquer multiplicação modesta
+   cruza o limiar de visibilidade.
+2. **`env` domina.** Baixar `envMapIntensity` para 40% fazia a folhagem
+   sumir, enquanto derrubar o albedo quase pela metade quase não mudava.
+   Ou seja: **a folhagem à noite é iluminada majoritariamente pelo mapa
+   de ambiente**, e o `envI` da parada `night` é 0,91 contra 1,05 do
+   `day` — o IBL do céu quase não escurece ao anoitecer. Isso é um
+   achado maior que o defeito da folhagem e fica registrado como tal.
+
+E, olhando o controle com justiça: o verde está alto, mas **não é
+"videogame"** como eu tinha escrito na primeira leitura. Corrigido para
+`0,18 / 0,25 / 0,05` — tira o excesso sem apagar o sítio.
 
 **Sobre F, a piscina.** Cinco rodadas de diagnóstico, e o resultado é uma
 caracterização precisa em vez de um conserto. Vale registrar o caminho
@@ -447,6 +484,15 @@ dispositivos está **vazia** em vez de preenchida com estimativa.
    sistema de tiers foi escrito e tipa-verificado, mas o caminho
    `PRESENTATION_SAFE` nunca foi exercitado num aparelho que realmente
    desabe.
+1b. **O IBL do céu quase não escurece ao anoitecer** (`envI` 1,05 de dia
+   contra 0,91 à noite). Descoberto ao calibrar a folhagem, e é mais
+   amplo que ela: significa que **toda** superfície da cena recebe, à
+   meia-noite, quase a mesma luz de ambiente do meio-dia. O rebaixamento
+   noturno hoje é feito material a material (colina, folhagem,
+   revestimento da piscina), o que funciona mas não escala — cada
+   material novo nasce com o defeito. Não mexi na curva global nesta
+   rodada porque ela afeta o quadro inteiro e eu não teria como
+   revalidar as sete capturas a tempo.
 2. **Quatro defeitos visuais abertos**: deck e piso de terraço lendo como
    vazio no golden hour, piscina verde-musgo pela mesma causa, tiling da
    textura de grama, copas próximas lendo como massa de cartões. Os dois

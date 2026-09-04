@@ -1461,7 +1461,28 @@ function applySolarTime(t) {
     // e `envI` da parada 'night' e 0,91 contra 1,05 do 'day', quase sem
     // queda. Por isso o valor de `env` aqui e conservador: o exagero
     // apagava a paisagem e trocava um defeito por outro.
-    const K = window.__FOLHA_K || { escuro: 0.45, dessat: 0.45, env: 0.20 };
+    //
+    // VARREDURA DE CALIBRACAO (um boot, quatro valores, capitulo 13):
+    //
+    //   escuro/dessat/env   resultado
+    //   0    /0    /0       controle: arvores VERDES e iluminadas
+    //   0,30 /0,35 /0,10    folhagem quase SUMIU
+    //   0,45 /0,45 /0,20    folhagem sumiu; casa flutuando num vazio
+    //
+    // A curva e brutalmente sensivel: entre "verde demais" e "nao existe"
+    // ha menos de 0,3 de parametro. Faz sentido -- a noite a faixa
+    // dinamica do quadro e minuscula (p50 = 16/255), entao qualquer
+    // multiplicacao modesta cruza o limiar de visibilidade.
+    //
+    // E olhando o controle com justica: o verde esta alto, mas nao e
+    // "videogame" como eu tinha escrito na primeira leitura. Apagar a
+    // paisagem para corrigir saturacao seria trocar um defeito por um
+    // pior -- num quadro chamado "Visao Final", o terreno faz parte do
+    // que se vende.
+    //
+    // Entao a correcao e PEQUENA de proposito: tira o excesso de verde
+    // sem apagar o sitio.
+    const K = window.__FOLHA_K || { escuro: 0.18, dessat: 0.25, env: 0.05 };
     for (let i = 0; i < folhagemRegistrada.length; i++) {
       const mat = folhagemRegistrada[i];
       // MEDIDO na recaptura: com queda de albedo de 0,66 e mais nada, a
