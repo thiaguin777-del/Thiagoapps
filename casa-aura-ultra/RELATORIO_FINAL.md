@@ -294,17 +294,58 @@ profundidade da cena atrás da partícula. Fica atrás de `?poeira=1`.
 | G | Tiling visível da textura de grama | `ABERTO` |
 | H | Copas próximas leem como massa de cartões | `ABERTO` |
 
-**Sobre E e F.** A comparação com o quadro noturno corrigiu minha própria
-hipótese: **não é o material da água.** À noite o revestimento da piscina
-acende junto com as luminárias (`emissiveIntensity = 0,35 + lamp × 1,15`)
-e a lâmina lê perfeitamente translúcida. No golden hour o sol a 11° de
-elevação não alcança nem o fundo da bacia nem o deck, e a hemisférica
-sozinha (0,28) não paga a conta em superfície voltada para cima com
-albedo baixo.
+**Sobre F, a piscina.** Cinco rodadas de diagnóstico, e o resultado é uma
+caracterização precisa em vez de um conserto. Vale registrar o caminho
+porque **três hipóteses minhas morreram na medição**, incluindo uma que
+eu já tinha escrito neste relatório.
 
-Isso é **fisicamente correto e comercialmente ruim**: a legenda do
-capítulo 9 vende "borda infinita, deck em ipê e área gourmet coberta", e
-no golden hour nenhum dos três aparece.
+Mesma câmera (capítulo 9), mesmo material, só a hora muda:
+
+| hora | como lê |
+|---|---|
+| dia (`t=0`) | turquesa, translúcida, ladrilho do fundo visível **através** da água, deck de ipê marrom quente. **Vendável.** |
+| golden (`t=0,52`) | verde-musgo e opaca, deck preto |
+| blue (`t=0,76`) | retângulo **preto**, só a fita de LED |
+| noite (`t=1,0`) | idem |
+
+**Correção de uma afirmação minha anterior:** eu tinha registrado que a
+piscina "lê certo à noite". Aquilo veio do plano distante do capítulo 13,
+onde a superfície reflete o céu. De perto, à noite, ela é preta.
+
+O que foi **descartado por medição**, não por opinião:
+
+| hipótese | teste | resultado |
+|---|---|---|
+| Material da água errado | mesma água às 4 horas | no dia está correta — não é o material |
+| A água opaca esconde o fundo | `waterObj.visible = false` | bacia **continua preta** |
+| O emissivo do revestimento não é aplicado | leitura do material nas 4 horas | é aplicado: `0,35 → 1,04 → 1,50 → 2,19`, e as bordas **respondem** a ele |
+| Faces internas descartadas (`FrontSide`) | `side = DoubleSide` em execução | **sem efeito** |
+| Emissivo fraco demais | intensidade 6,0 + marcador magenta | só as bordas externas ficam magenta; o interior **não** |
+
+O que **está estabelecido**: existe **uma** malha com `M.revestPiscina`
+(piso e paredes foram mesclados), sua caixa cobre a bacia
+(`x[-10,8; -0,4] z[7,8; 13,0] y[-1,80; 0,06]`), ela está visível — e
+mesmo assim o interior da bacia não aparece com nenhum valor de `side`,
+nenhuma intensidade de emissivo, com ou sem água. **Algo oclui a bacia.**
+
+Não consegui identificar o quê, e a razão é honesta: as ferramentas de
+caixa envelopante não servem aqui. A cena mescla geometria por material,
+e a AABB de uma malha mesclada cobre o lote inteiro — o levantamento de
+candidatos a oclusão devolveu 23 malhas, a maior com **810.000 m²** de
+área em planta. Este mesmo obstáculo já custou duas rodadas neste
+projeto. Responder exige sonda de profundidade real (ler o depth buffer
+ou um raycast por triângulo), que é plumbing de composer.
+
+Próximo passo para quem pegar: suspeitar do deck não perfurado na
+abertura da piscina, e confirmar lendo profundidade, não caixas.
+
+**Sobre E, o deck e o piso do terraço.** Causa diferente e mais simples:
+com o sol a 11° de elevação, superfície voltada para cima recebe
+`sin(11°) = 0,19` da luz direta, contra `cos(11°) = 0,98` de uma parede
+virada para o sol. Na sombra da casa sobra a hemisférica (0,28) sobre
+albedo baixo. É **fisicamente correto e comercialmente ruim**: a legenda
+do capítulo 9 vende "borda infinita, deck em ipê e área gourmet coberta",
+e no golden hour nenhum dos três aparece.
 
 ### Observação de direção de arte, não defeito
 

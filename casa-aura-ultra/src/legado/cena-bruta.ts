@@ -1448,10 +1448,38 @@ function applySolarTime(t) {
   if (folhagemRegistrada.length) {
     const kk = Math.max(0, Math.min(1, (solarTime - 0.62) / 0.34));
     const kn = kk * kk * (3 - 2 * kk);
+    // Ponto de ajuste deliberado, na mesma linha de `window.__RECT_K`
+    // logo abaixo: um boot custa cerca de dez minutos nesta maquina, e
+    // calibrar tres valores recarregando tres vezes nao e viavel. Com
+    // isto, uma corrida so varre a faixa inteira.
+    //
+    // MEDIDO durante a calibracao, e foi uma surpresa: `env` sozinho
+    // dominava o resultado. Baixar envMapIntensity para 40% fazia a
+    // folhagem SUMIR, enquanto derrubar o albedo quase pela metade quase
+    // nao mudava nada. Ou seja, a folhagem a noite e iluminada
+    // majoritariamente pelo MAPA DE AMBIENTE, nao pela hemisferica --
+    // e `envI` da parada 'night' e 0,91 contra 1,05 do 'day', quase sem
+    // queda. Por isso o valor de `env` aqui e conservador: o exagero
+    // apagava a paisagem e trocava um defeito por outro.
+    const K = window.__FOLHA_K || { escuro: 0.45, dessat: 0.45, env: 0.20 };
     for (let i = 0; i < folhagemRegistrada.length; i++) {
       const mat = folhagemRegistrada[i];
-      mat.color.copy(mat.userData.__corDia).multiplyScalar(1 - 0.66 * kn);
-      mat.envMapIntensity = mat.userData.__envDia * (1 - 0.75 * kn);
+      // MEDIDO na recaptura: com queda de albedo de 0,66 e mais nada, a
+      // folhagem sumiu POR COMPLETO no capitulo 13 e a casa ficou
+      // flutuando num vazio sem sitio. Trocar arvore verde-brilhante por
+      // arvore inexistente nao e conserto, e outro defeito -- e num quadro
+      // que se chama "Visao Final" e pior, porque o terreno faz parte do
+      // que se vende.
+      //
+      // A folha a noite nao e preta: e uma silhueta azul-esverdeada
+      // escura, porque a unica luz que sobra e o ceu. Entao dessatura-se
+      // JUNTO com escurecer -- exatamente o que o conserto da colina
+      // (logo acima) faz com `lerp(s.fog, ...)`. A noite `s.fog` e
+      // #1b2740, o azul do proprio ambiente.
+      mat.color.copy(mat.userData.__corDia)
+               .lerp(s.fog, kn * K.dessat)
+               .multiplyScalar(1 - K.escuro * kn);
+      mat.envMapIntensity = mat.userData.__envDia * (1 - K.env * kn);
     }
   }
   sunLight.color.copy(s.sunC);
