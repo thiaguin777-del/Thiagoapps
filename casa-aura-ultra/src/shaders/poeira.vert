@@ -1,5 +1,7 @@
 uniform float casaAura_tempo;
 uniform float casaAura_tamanho;
+// Direcao PARA onde o sol aponta (do sol para a cena), normalizada.
+uniform vec3 casaAura_sol;
 attribute vec3 casaAura_semente;   // x: fase, y: velocidade, z: raio da orbita
 varying float casaAura_alpha;
 
@@ -42,4 +44,34 @@ void main() {
   // Some com a distancia (nao virar neve no horizonte) E MUITO PERTO: a
   // 40 cm da lente a particula estaria fora de foco, sem contraste.
   casaAura_alpha = smoothstep(60.0, 6.0, -mv.z) * smoothstep(0.35, 1.6, -mv.z);
+
+  // ------------------------------------------------------------
+  // POEIRA SO APARECE CONTRA A LUZ
+  //
+  // ACHADO NA CAPTURA DO ESTAR, recapturada pelo caminho do produto:
+  // dezenas de pontos brancos por cima de parede, teto e sofa. Lia como
+  // sujeira na lente, e num interior fechado isso arruina o quadro.
+  //
+  // A rodada anterior ja tinha consertado TAMANHO e opacidade, e o
+  // blending ja era aditivo. O que faltava era o modelo fisico.
+  //
+  // Poeira nao brilha: ela ESPALHA. E o espalhamento de Mie e
+  // fortemente para a FRENTE -- um grao devolve para o observador
+  // dezenas de vezes mais luz quando a fonte esta atras dele do que
+  // quando esta atras do observador. Por isso poeira e visivel num raio
+  // de sol entrando pela janela e INVISIVEL contra uma parede iluminada:
+  // ali ela tem a mesma luminancia do fundo.
+  //
+  // A conta e um produto escalar: quanto a direcao de visao se alinha
+  // com a direcao da luz. Elevado ao cubo para concentrar o lobulo,
+  // como o termo de Henyey-Greenstein faz de forma mais cara.
+  //
+  // O piso de 0,08 e deliberado: nao vai a zero, senao a poeira sumiria
+  // por completo em todo quadro que nao olha para o sol, e o ar voltaria
+  // a ficar limpo demais -- que era o defeito ANTES de a poeira existir.
+  // ------------------------------------------------------------
+  vec3 pMundo = (modelMatrix * vec4(p, 1.0)).xyz;
+  vec3 paraCamera = normalize(cameraPosition - pMundo);
+  float contraLuz = max(0.0, dot(paraCamera, -casaAura_sol));
+  casaAura_alpha *= 0.08 + 0.92 * pow(contraLuz, 3.0);
 }

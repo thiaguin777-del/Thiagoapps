@@ -306,6 +306,11 @@ export class CasaAuraScene {
       if (dir.dot(this.direcaoSol) < 0.9999) {
         this.direcaoSol.copy(dir);
         volumetrica.reapontar(dir);
+        // A poeira precisa saber para onde o sol aponta: é isso que a
+        // faz aparecer contra a luz e sumir contra a parede. Alimentada
+        // aqui, junto da volumétrica, para que as duas nunca discordem
+        // sobre de onde vem a luz — e só quando a hora muda de fato.
+        this.particulas.definirSol(dir);
       }
       volumetrica.aplicarHoraSolar(horaSolar);
       // Cáustica segue o sol: ela é luz refratada pela superfície, e

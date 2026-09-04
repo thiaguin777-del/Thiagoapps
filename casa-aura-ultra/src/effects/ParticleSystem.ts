@@ -93,6 +93,10 @@ export function criarPoeira(
       // ganhou um teto de 6 px e um fade de perto. Com o teto fazendo o
       // trabalho pesado, este valor governa só a faixa média.
       casaAura_tamanho: { value: 0.9 },
+      // Direcao do sol, alimentada por `CasaAuraScene.quadro`. Ver o
+      // comentario longo em poeira.vert: e ela que faz a poeira aparecer
+      // contra a luz e sumir contra a parede.
+      casaAura_sol: { value: new THREE.Vector3(0, -1, 0) },
       casaAura_cor: { value: new THREE.Color(0xfff2dc) },
       // Blending aditivo já acumula onde as partículas se sobrepõem;
       // 0,5 por partícula estourava para branco sólido nos aglomerados.
@@ -252,6 +256,14 @@ export class ParticleSystem {
   }
 
   /** Chamar por quadro com o delta em segundos. */
+  /** Direcao do sol para o termo de contraluz da poeira. */
+  definirSol(dir: THREE.Vector3): void {
+    for (const o of this.grupos) {
+      const m = (o as THREE.Points).material as THREE.ShaderMaterial | undefined;
+      if (m?.uniforms?.casaAura_sol) m.uniforms.casaAura_sol.value.copy(dir);
+    }
+  }
+
   atualizar(dt: number): void {
     this.tempo += dt;
     for (const o of this.grupos) {
