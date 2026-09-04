@@ -109,6 +109,20 @@ export class ProtecaoDeApresentacao {
   /** Toda transição carrega ficha; uma nova invalida as pendentes. */
   private ficha = 0;
   private pendentes = new Set<number>();
+  /**
+   * Tier travado por `?tier=`. O governador para de decidir.
+   *
+   * DEFEITO MEDIDO durante a captura de renders: abri com
+   * `?tier=REALTIME` e o proprio governador rebaixou para
+   * PRESENTATION_SAFE no meio da corrida, porque o FPS medido nesta
+   * maquina e catastrofico. Duas das tres capturas sairam do modo
+   * seguro em vez da cena.
+   *
+   * Uma opcao de auditoria que se desfaz sozinha nao serve para
+   * auditar. `?q=` do QualityController ja tinha exatamente esta
+   * trava, pelo mesmo motivo; faltava aqui.
+   */
+  private travado = false;
 
   aoTrocarTier: ((tier: Tier, motivo: string) => void) | null = null;
 
@@ -179,7 +193,9 @@ export class ProtecaoDeApresentacao {
     this.tUltimo = this.tInicio;
 
     if (forcado) {
-      this.trocar(forcado, 'forçado por ?tier=');
+      this.travado = true;
+      this.trocar(forcado, 'forçado por ?tier= — governador desligado');
+      console.info('[protecao] tier TRAVADO por ?tier=: nenhuma troca automática');
       return;
     }
     const s = this._sonda;
@@ -203,6 +219,8 @@ export class ProtecaoDeApresentacao {
     const agora = performance.now();
     const ms = agora - this.tUltimo;
     this.tUltimo = agora;
+    // Travado por `?tier=`: continua MEDINDO (o relatório de debug é o
+    // motivo de existir a flag) mas não decide mais nada.
     if (this._tier === 'PRESENTATION_SAFE') return;
 
     // Aquecimento: compilação de shader e upload de textura acontecem
@@ -226,7 +244,7 @@ export class ProtecaoDeApresentacao {
     const fpsMediana = 1000 / pc.p50;
 
     // Caminho do modo seguro: FPS abaixo do piso por tempo suficiente.
-    if (fpsMediana < FPS_SEGURO) {
+    if (fpsMediana < FPS_SEGURO && !this.travado) {
       this.tAbaixoDoSeguro += janela;
       if (this.tAbaixoDoSeguro >= MS_ATE_SEGURO) {
         this.trocar('PRESENTATION_SAFE',
@@ -237,6 +255,7 @@ export class ProtecaoDeApresentacao {
       this.tAbaixoDoSeguro = 0;
     }
 
+    if (this.travado) return;
     const ruim = fpsMediana < FPS_DEGRAU || pc.p95 > P95_DEGRAU_MS;
     if (ruim) {
       this.degradar(`mediana ${fpsMediana.toFixed(1)} fps, p95 ${pc.p95.toFixed(1)} ms`);
@@ -340,6 +359,7 @@ export class ProtecaoDeApresentacao {
     const s = this._sonda;
     return {
       tier: this._tier,
+      travado: this.travado,
       motivoDaTroca: this._motivoDaTroca,
       degrau: this.degrau,
       fps: pc ? { p50: +(1000 / pc.p50).toFixed(1), p95: +(1000 / pc.p95).toFixed(1),
