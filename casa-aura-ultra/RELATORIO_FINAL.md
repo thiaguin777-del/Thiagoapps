@@ -283,7 +283,15 @@ vazio, agora em 6–8/255 em vez de 0. Ver "Defeitos visuais" abaixo.
 | Colina de fundo escurece à noite | `VISUAL VERIFIED` — silhueta azul-escura, era verde clara |
 | Poeira fora dos interiores | `VISUAL VERIFIED` — cozinha no golden hour, o quadro que a expôs, agora limpo |
 | Suíte master pela câmera do produto | `VISUAL VERIFIED` — render vendável |
-| Piscina à noite | `VISUAL VERIFIED` — lâmina translúcida, LED de borda, fundo visível |
+| Folhagem à noite | `VISUAL VERIFIED` — deixou de brilhar verde sem apagar o sítio |
+
+**Uma linha que estava aqui foi removida:** eu tinha listado "piscina à
+noite" como `VISUAL VERIFIED`, com "lâmina translúcida e fundo visível".
+Era a leitura do plano **distante** do capítulo 13, onde a superfície
+reflete o céu. Da câmera do capítulo 9, à noite, a piscina é **preta** —
+e este mesmo documento diz isso vinte linhas abaixo. Duas afirmações
+contraditórias no mesmo relatório valem menos que nenhuma; fica a que a
+medição sustenta.
 
 ### A poeira: por que foi desligada e não recalibrada
 

@@ -15,10 +15,12 @@ O código já traz o instrumento. Você só precisa abrir e ler.
 2. Deixe a cena carregar por completo.
 3. **Explore por 60 segundos** — gire, aproxime, entre num ambiente. Não
    deixe parada: o que interessa é o tempo de quadro em movimento.
-4. Abra o console do navegador. A cada segundo sai uma linha assim:
+4. Abra o console do navegador. A cada segundo sai uma linha com este
+   **formato** — os números abaixo são inventados só para mostrar a
+   forma da linha, **não são medição de aparelho nenhum**:
 
 ```
-[perf] 58 fps | quadro 17.2 ms | p50 16.8 p95 21.4 p99 33.1 pior 48.0 engasgos 3 | 214 draw | 99 programas
+[perf] NN fps | quadro NN.N ms | p50 NN.N p95 NN.N p99 NN.N pior NN.N engasgos N | NNN draw | NN programas
 ```
 
 5. Copie a linha depois dos 60 s e preencha a tabela.
