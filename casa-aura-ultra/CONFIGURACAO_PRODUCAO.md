@@ -143,3 +143,24 @@ nesta.
 O aviso de que **Casa Aura é projeto conceitual** está em
 `index.html`, classe `.disclaimer`, e deve permanecer até haver
 autorização e dados de um imóvel real.
+
+---
+
+## Parâmetros de URL
+
+Levantados do código-fonte, não de memória — `grep -rn "location.search" src/`.
+
+| parâmetro | valores | para que serve |
+|---|---|---|
+| `?wa=` | número com código do país | trocar o WhatsApp do CTA sem republicar. Tem precedência sobre tudo. |
+| `?debug=1` | — | painel de diagnóstico: tier, motivo da última troca, FPS e tempo de quadro em p50/p95/p99, draws, triângulos, programas, DPR, renderer. É o instrumento da `MATRIZ_DISPOSITIVOS.md`. |
+| `?q=` | `ultra`, `high`, `medium`, `low` | trava o preset de qualidade e **desliga o rebaixamento automático**. Serve para auditar um tier específico e para o corretor forçar `ultra` num notebook bom. |
+| `?tier=` | `REALTIME`, `COMPATIBILITY`, `PRESENTATION_SAFE` | trava o tier de proteção de apresentação. Igual ao `?q=`, desliga as decisões do governador — mas **não** as medições, para o `?debug=1` continuar honesto. |
+| `?validar=1` | — | roda a autoverificação de arranque e imprime o resultado no console. |
+| `?assets=` | caminho ou URL | muda a base dos assets externos. Usado para servir a pasta `assets/` de um CDN. |
+| `?models=1` | — | tenta carregar os GLB externos em vez da geometria procedural. Sem os arquivos, cai na procedural. |
+| `?semente=` | número | fixa a semente da vegetação procedural, para duas capturas ficarem comparáveis. |
+| `?poeira=1` | — | liga a poeira suspensa, **desligada por padrão**. Ver a análise em `CasaAuraScene.montarParticulas`: com blending aditivo não existe opacidade que apareça na sombra e suma na luz. |
+
+Os três primeiros são os que interessam a quem vende. Os demais são de
+diagnóstico e não precisam aparecer para o cliente.

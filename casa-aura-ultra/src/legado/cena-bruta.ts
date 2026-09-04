@@ -212,6 +212,12 @@ let waterMaterial = null, glassMaterial = null, waterNormalMap = null;
 let hillMaterial = null;
 /** Albedo do relevo ao meio-dia. `applySolarTime` caminha a partir daqui. */
 const HILL_ALBEDO_DIA = new THREE.Color(0x74856a);
+// Materiais de folhagem, descobertos UMA vez por travessia (ver
+// `registrarFolhagem`). applySolarTime roda a cada quadro durante o
+// arraste do heliodon, entao varrer a cena ali seria caro; varrer uma vez
+// e guardar as referencias custa nada e nao envelhece, porque a
+// descoberta e pela marca na textura, nao por lista escrita a mao.
+const folhagemRegistrada = [];
 let materialCentroids = {};
 let modelBounds = null;
 let camCurve = null, camCurveT = 0, camCurveTarget = 0;
@@ -970,6 +976,14 @@ async function init() {
   // buildHotspots();
   setPct(85);
   buildNavDots();
+  // Uma travessia so, com a cena inteira ja montada -- inclusive a mata
+  // distante, que e construida tarde e foi justamente o que a lista
+  // escrita a mao da rodada anterior deixou de fora.
+  registrarFolhagem();
+  // E aplica ja: quem abre direto num capitulo noturno (link com hora na
+  // URL, ou o Modo Apresentacao pulando para o capitulo 13) nao pode ver
+  // um quadro de folhagem diurna antes do primeiro applySolarTime.
+  applySolarTime(solarTime);
   setPct(93);
   setupEvents();
   setPct(100);
@@ -1309,6 +1323,46 @@ function solarStateAt(t) {
   };
 }
 
+// ------------------------------------------------------------
+// REGISTRO DA FOLHAGEM
+//
+// ACHADO NA CAPTURA NOTURNA (capitulo 13, "Visao Final" -- o ultimo
+// quadro que o cliente ve): a colina de fundo, consertada na rodada
+// anterior, esta certa; mas a fileira de arvores na encosta e a
+// folhagem em primeiro plano leem VERDE E ILUMINADAS contra um ceu
+// azul-escuro. Num quadro noturno de casa de alto padrao isso lê como
+// videogame.
+//
+// A causa esta nos presets: a noite usa hemiI 0,85, quase TRES VEZES o
+// valor do dia (0,3). E deliberado -- sem isso a cena noturna fecha em
+// preto. Mas folha tem albedo verde alto, e 0,85 de ceu azul ainda a
+// excita o bastante para ela brilhar. Na vida real folhagem a noite e
+// quase preta.
+//
+// A correcao e a MESMA ja aceita para `hillMaterial` logo abaixo:
+// derrubar a resposta do material conforme a noite entra, em vez de
+// mexer na luz global (que apagaria a casa junto). Aqui cai o albedo,
+// que e o que faz a folha devolver luz demais.
+// ------------------------------------------------------------
+function registrarFolhagem() {
+  if (!scene || folhagemRegistrada.length) return;
+  const vistos = new Set();
+  scene.traverse((o) => {
+    const m = o.material;
+    if (!m) return;
+    for (const mat of (Array.isArray(m) ? m : [m])) {
+      if (!mat || vistos.has(mat)) continue;
+      vistos.add(mat);
+      if (!mat.map || !mat.map.userData || !mat.map.userData.__folha) continue;
+      if (!mat.color) continue;
+      mat.userData.__corDia = mat.color.clone();
+      mat.userData.__envDia = mat.envMapIntensity !== undefined ? mat.envMapIntensity : 1;
+      folhagemRegistrada.push(mat);
+    }
+  });
+  if (DEBUG) console.info(`[folhagem] ${folhagemRegistrada.length} materiais registrados`);
+}
+
 function applySolarTime(t) {
   solarTime = Math.max(0, Math.min(1, t));
   const s = solarStateAt(solarTime);
@@ -1388,6 +1442,17 @@ function applySolarTime(t) {
     const k = t * t * (3 - 2 * t);
     hillMaterial.color.copy(HILL_ALBEDO_DIA).lerp(s.fog, k * 0.82);
     hillMaterial.envMapIntensity = 0.18 * (1 - k * 0.7);
+  }
+  // Mesma rampa noturna para a folhagem. `k` ja e a fracao de noite
+  // (0 antes de 0,62; 1 em 0,96), com smoothstep.
+  if (folhagemRegistrada.length) {
+    const kk = Math.max(0, Math.min(1, (solarTime - 0.62) / 0.34));
+    const kn = kk * kk * (3 - 2 * kk);
+    for (let i = 0; i < folhagemRegistrada.length; i++) {
+      const mat = folhagemRegistrada[i];
+      mat.color.copy(mat.userData.__corDia).multiplyScalar(1 - 0.66 * kn);
+      mat.envMapIntensity = mat.userData.__envDia * (1 - 0.75 * kn);
+    }
   }
   sunLight.color.copy(s.sunC);
   sunLight.intensity = s.sunI;
@@ -2552,6 +2617,22 @@ function leafCardTexture(baseHex, opts) {
 
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
+  // ------------------------------------------------------------
+  // A MARCA VAI NA TEXTURA, NAO NO MATERIAL
+  //
+  // Tres vezes nesta base uma lista de materiais mantida a mao envelheceu
+  // em silencio: a lista de anisotropia, o suavizador de folhagem (que
+  // deixou de fora a mata distante -- a maior area de folhagem de todo
+  // quadro externo) e o controlador de transmissao (que nao via o box do
+  // banheiro). Sempre pelo mesmo motivo: alguem cria um material local e
+  // a lista nao fica sabendo.
+  //
+  // Marcando a TEXTURA na fabrica, qualquer material que a use passa a
+  // ser reconhecivel como folhagem -- inclusive um material criado depois
+  // deste comentario, por alguem que nunca leu este arquivo. E o unico
+  // ponto por onde toda folha desta cena obrigatoriamente passa.
+  // ------------------------------------------------------------
+  tex.userData.__folha = true;
   return tex;
 }
 
@@ -2581,6 +2662,22 @@ function grassBladeCardTexture(baseHex) {
   }
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
+  // ------------------------------------------------------------
+  // A MARCA VAI NA TEXTURA, NAO NO MATERIAL
+  //
+  // Tres vezes nesta base uma lista de materiais mantida a mao envelheceu
+  // em silencio: a lista de anisotropia, o suavizador de folhagem (que
+  // deixou de fora a mata distante -- a maior area de folhagem de todo
+  // quadro externo) e o controlador de transmissao (que nao via o box do
+  // banheiro). Sempre pelo mesmo motivo: alguem cria um material local e
+  // a lista nao fica sabendo.
+  //
+  // Marcando a TEXTURA na fabrica, qualquer material que a use passa a
+  // ser reconhecivel como folhagem -- inclusive um material criado depois
+  // deste comentario, por alguem que nunca leu este arquivo. E o unico
+  // ponto por onde toda folha desta cena obrigatoriamente passa.
+  // ------------------------------------------------------------
+  tex.userData.__folha = true;
   return tex;
 }
 
