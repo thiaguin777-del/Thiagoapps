@@ -714,22 +714,62 @@ async function init() {
   // Teto absoluto continua existindo, generoso, para o caso de o
   // progresso andar mas nunca terminar.
   // ------------------------------------------------------------
+  //
+  // E O RELÓGIO NÃO PODE SER O DE PAREDE
+  //
+  // Trocar "demorou" por "parou" corrigiu metade do problema e deixou a
+  // outra metade de pé. Uma ABA ESCONDIDA congela o requestAnimationFrame
+  // — é o navegador economizando bateria, não a cena travando. Mas
+  // `setInterval` continua rodando (afunilado para ~1 Hz, e é o
+  // suficiente). Resultado: trocar de aba por 25 s durante o boot mandava
+  // para o fallback um aparelho que estava perfeitamente bem, e o
+  // fallback é TERMINAL por projeto — não havia volta ao voltar.
+  //
+  // Este era o defeito real por trás de "voltar do segundo plano não
+  // recupera do fallback": a pergunta não era como recuperar, era por que
+  // tinha ido para lá. Descontar o tempo escondido resolve na origem.
+  //
+  // O desconto é ancorado no instante do último progresso, não somado no
+  // total, senão o crédito de uma pausa antiga pagaria por um travamento
+  // de agora.
+  // ------------------------------------------------------------
   let initDone = false;
   const PARADO_MS = 25000;    // sem avançar uma etapa por 25 s = travado
   const TETO_MS = 180000;     // 3 min de teto absoluto, último recurso
   const t0Init = performance.now();
   let ultimoProgresso = t0Init;
   let etapasVistas = -1;
+
+  let escondidoAcumulado = 0;
+  let tEscondeu = document.hidden ? t0Init : 0;
+  const aoTrocarVisibilidade = () => {
+    if (document.hidden) { if (!tEscondeu) tEscondeu = performance.now(); }
+    else if (tEscondeu) { escondidoAcumulado += performance.now() - tEscondeu; tEscondeu = 0; }
+  };
+  document.addEventListener('visibilitychange', aoTrocarVisibilidade);
+  const escondidoAte = (agora) => escondidoAcumulado + (tEscondeu ? agora - tEscondeu : 0);
+  let escondidoNoProgresso = escondidoAte(t0Init);
+
+  const encerrarVigia = () => {
+    window.clearInterval(vigia);
+    document.removeEventListener('visibilitychange', aoTrocarVisibilidade);
+  };
   const vigia = window.setInterval(() => {
-    if (initDone) { window.clearInterval(vigia); return; }
-    const n = BuildTrace.completedSteps.length;
-    if (n !== etapasVistas) { etapasVistas = n; ultimoProgresso = performance.now(); }
+    if (initDone) { encerrarVigia(); return; }
     const agora = performance.now();
-    if (agora - ultimoProgresso > PARADO_MS) {
-      window.clearInterval(vigia);
+    const n = BuildTrace.completedSteps.length;
+    if (n !== etapasVistas) {
+      etapasVistas = n;
+      ultimoProgresso = agora;
+      escondidoNoProgresso = escondidoAte(agora);
+    }
+    const parado = (agora - ultimoProgresso) - (escondidoAte(agora) - escondidoNoProgresso);
+    const decorrido = (agora - t0Init) - escondidoAte(agora);
+    if (parado > PARADO_MS) {
+      encerrarVigia();
       showFallback('init-travado');
-    } else if (agora - t0Init > TETO_MS) {
-      window.clearInterval(vigia);
+    } else if (decorrido > TETO_MS) {
+      encerrarVigia();
       showFallback('init-timeout');
     }
   }, 2000);
@@ -1654,8 +1694,37 @@ const ColorGradeShader = {
     'vec3 reinhard = clamp(c/(c+1.0), 0.0, 1.0);',
     'c = mix(aces, reinhard, tmSimples);',
     // daqui para baixo c está em 0..1 e o grade opera como sempre operou
-    'c = c + lift*(1.0-c);',
+    // ------------------------------------------------------------
+    // O LIFT VEM DEPOIS DO CONTRASTE, E ISSO NÃO É ESTILO
+    //
+    // MEDIDO nas capturas, com histograma, não a olho:
+    //
+    //   golden hour  ->  26,56% do quadro em L<=4 (preto absoluto)
+    //   noite        ->  43,17% do quadro em L<=4
+    //   dia          ->   3,44%
+    //
+    // Um quarto do golden hour — a foto que o corretor usa para vender —
+    // era buraco preto sem informação recuperável. E o estouro do outro
+    // lado era 0,00%: o defeito estava todo na sombra.
+    //
+    // A causa era a ORDEM. O lift levantava o ponto de preto e o
+    // contraste, logo em seguida, o devolvia para baixo de zero:
+    //
+    //   t=0,93 -> contraste 1,133, lift 0,038
+    //   0 --lift--> 0,038 --contraste--> (0,038-0,5)*1,133+0,5 = -0,023
+    //   clamp -> 0
+    //
+    // Resolvendo para a entrada, TUDO abaixo de 2,15% de sinal virava
+    // zero exato. O lift não estava "fraco": estava sendo anulado.
+    //
+    // Invertido, o lift é a última coisa que toca a sombra — que é como
+    // funciona a curva de pé de um negativo, e é por isso que foto de
+    // arquitetura tem preto lavado e não preto morto. O contraste ainda
+    // pode empurrar um valor abaixo de zero; o lift o traz de volta,
+    // porque o clamp só acontece no gl_FragColor, no fim.
+    // ------------------------------------------------------------
     'c = (c-0.5)*contrast+0.5;',
+    'c = c + lift*(1.0-c);',
     'float l=dot(c,vec3(0.299,0.587,0.114)); c=mix(vec3(l),c,saturation);',
     'c.r += warmth*0.04; c.b -= warmth*0.04;',
     'gl_FragColor=vec4(clamp(c,0.0,1.0),1.0); }'
@@ -1735,7 +1804,10 @@ function updateGradeForSolarTime(t) {
     gradePass.uniforms.saturation.value = 1.06 + t * 0.10;
     gradePass.uniforms.contrast.value  = 1.04 + t * 0.10;
     gradePass.uniforms.warmth.value    = 0.35 - t * 0.75;
-    gradePass.uniforms.lift.value      = 0.010 + t * 0.030;
+    // Com o lift agora efetivo (ver ColorGradeShader), este número virou
+    // literalmente o piso do preto na imagem final: 0,065 -> 17/255 à
+    // noite, 2,5/255 ao meio-dia. Antes o valor era decorativo.
+    gradePass.uniforms.lift.value      = 0.010 + t * 0.055;
   }
   if (grainPass) grainPass.uniforms.amount.value = 0.014 + t * 0.024;
   // Guardado, não aplicado: quem aplica é `atualizarBloomPorLocal()`, a
@@ -8178,22 +8250,73 @@ export function controlarAntialias(ligado) {
  * Transmissão do vidro. `transmission > 0` obriga o Three.js a renderizar
  * a cena num alvo separado para refratar — é o efeito mais caro por
  * pixel da casa inteira. Desligado, o vidro vira translúcido comum.
+ *
+ * ------------------------------------------------------------
+ * A CENA É O INVENTÁRIO. O DICIONÁRIO NÃO É.
+ *
+ * Esta função agia sobre uma referência só, `glassMaterial`, que é
+ * `M.vidro`. E `createShowerEnclosure` constrói o SEU PRÓPRIO
+ * MeshPhysicalMaterial com `transmission: 0.82`, local à função, um por
+ * chamada. Nunca foi visto por aqui.
+ *
+ * Consequência medida na leitura do código: no tier COMPATIBILITY, que
+ * existe justamente para não pagar o passe de refração, o box do
+ * banheiro continuava pagando — e ainda alocava um programa de shader
+ * por instância.
+ *
+ * Esta é a TERCEIRA vez que este mesmo erro aparece nesta base: antes
+ * foi a lista de anisotropia, depois `suavizarFolhagem` deixando de
+ * fora a `farMat` da mata distante (a maior área de folhagem de todo
+ * quadro externo). O padrão é sempre o mesmo — uma lista mantida à mão
+ * envelhece em silêncio assim que alguém cria um material local.
+ *
+ * Então não se mantém mais lista. Varre-se a cena e pergunta-se ao
+ * material se ele tem transmissão. O custo é uma travessia por troca de
+ * tier, algo que acontece punhados de vezes numa sessão.
+ * ------------------------------------------------------------
  */
 export function controlarTransmissao(ligado) {
-  if (!glassMaterial) return;
-  if (ligado) {
-    if (glassMaterial.__transmissaoOriginal !== undefined) {
-      glassMaterial.transmission = glassMaterial.__transmissaoOriginal;
+  const aplicar = (mat) => {
+    if (!mat || mat.transmission === undefined) return;
+    if (ligado) {
+      if (mat.__transmissaoOriginal !== undefined) {
+        mat.transmission = mat.__transmissaoOriginal;
+        if (mat.__opacidadeOriginal !== undefined) mat.opacity = mat.__opacidadeOriginal;
+        if (mat.__transparentOriginal !== undefined) mat.transparent = mat.__transparentOriginal;
+      }
+    } else {
+      if (mat.__transmissaoOriginal === undefined) {
+        mat.__transmissaoOriginal = mat.transmission;
+        mat.__opacidadeOriginal = mat.opacity;
+        mat.__transparentOriginal = mat.transparent;
+      }
+      // Sem transmissão o vidro ficaria opaco; a opacidade substitui o
+      // que a refração fazia, mantendo a leitura de "dá para ver
+      // através" que a casa inteira depende para vender o vão.
+      mat.transmission = 0;
+      mat.opacity = 0.34;
+      mat.transparent = true;
     }
-  } else {
-    if (glassMaterial.__transmissaoOriginal === undefined) {
-      glassMaterial.__transmissaoOriginal = glassMaterial.transmission;
-    }
-    glassMaterial.transmission = 0;
-    glassMaterial.opacity = 0.34;
-    glassMaterial.transparent = true;
+    mat.needsUpdate = true;
+  };
+
+  const vistos = new Set();
+  const visitar = (mat) => {
+    if (!mat || vistos.has(mat)) return;
+    vistos.add(mat);
+    aplicar(mat);
+  };
+  // `glassMaterial` continua sendo tratado explicitamente porque pode
+  // existir antes de a cena montar; o `Set` evita aplicar duas vezes.
+  visitar(glassMaterial);
+  if (scene) {
+    scene.traverse((o) => {
+      const m = o.material;
+      if (!m) return;
+      if (Array.isArray(m)) m.forEach(visitar);
+      else visitar(m);
+    });
   }
-  glassMaterial.needsUpdate = true;
 }
 
 /** Tone mapping simples no passe de grade, em vez de ACES. */
