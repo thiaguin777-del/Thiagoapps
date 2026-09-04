@@ -26,29 +26,44 @@ marcado como não tendo. Nenhuma afirmação de "sem bugs", "60 FPS" ou
 |---|---|---|
 | `npm ci` | 4,9 s | 22 pacotes |
 | `npm run typecheck` | 1,5 s | sem erro |
-| `npm run build` | 3,6 s | sem erro |
-| `npm run build:unico` | 3,5 s | sem erro |
+| `npm run build` | 4,5 s | sem erro |
+| `npm run build:unico` | 3,3 s | sem erro |
+| `npm run teste:fsm` | 37,2 s | **0 falhas** — 42 pares + 7 propriedades |
+| `npm run teste:aba-escondida` | — | `UNTESTED` — precisa de navegador; sem GPU, ~10 min por boot |
+
+**Correção:** anotei em commit que o teste da FSM roda em "~1 s". São
+**37,2 s**: ele chama `npx tsc` para transpilar a `StateMachine.ts` antes
+de rodar, e é esse spawn que domina o tempo. O teste em si é instantâneo.
 
 ### Bundles
 
-| arquivo | bruto | gzip |
-|---|---|---|
-| `three` | 1 074,38 kB | 348,47 kB |
-| `cena-bruta` | 113,23 kB | 40,53 kB |
-| `gsap` | 70,49 kB | 27,84 kB |
-| `howler` | 36,58 kB | 9,92 kB |
-| `CasaAuraScene` | 27,46 kB | 10,46 kB |
-| `index` | 14,55 kB | 5,72 kB |
+| arquivo | bruto |
+|---|---|
+| `three` | 1 074 383 B |
+| `cena-bruta` | 115 018 B |
+| `gsap` | 70 486 B |
+| `howler` | 36 575 B |
+| `CasaAuraScene` | 29 478 B |
+| `index` | 18 068 B |
 
-19 chunks JS · `dist` 6 520 454 bytes com sourcemaps.
+`dist` 6 535 169 bytes com sourcemaps. O crescimento de `cena-bruta`
+(+1,8 kB) e de `index` (+3,5 kB) é o custo desta rodada: registro de
+folhagem, desconto de tempo escondido no vigia, travessia de transmissão
+e o clamp do grade.
 
 ### Artefatos e hashes
 
 | arquivo | bytes | SHA-256 (16 primeiros) |
 |---|---|---|
-| `casa-aura.html` | 1 412 117 | `0535fa5b347b2222…` |
-| `casa-aura-fonte.zip` | 273 798 | `236e11548a2392d4…` |
-| `dist/index.html` | 8 878 | `3389c09ccf455eae…` |
+| `casa-aura.html` | 1 417 798 | `7f7f9ccc0b965185…` |
+| `casa-aura-fonte.zip` | 813 869 | `01918e2d0549b7c5…` |
+| `dist/index.html` | 9 320 | `36211fe674be4fd1…` |
+
+O zip triplicou (273 798 → 813 869 B) e isso é **esperado**: passou a
+incluir `public/` — com os **sete renders da galeria do modo seguro**,
+que antes ficavam de fora — mais `testes/` e os documentos de entrega.
+Um zip que não trouxesse os renders entregaria um modo seguro sem
+imagens.
 
 ### Vulnerabilidades
 
