@@ -59,6 +59,11 @@ e o clamp do grade.
 | `casa-aura-fonte.zip` | 813 869 | `01918e2d0549b7c5…` |
 | `dist/index.html` | 9 320 | `36211fe674be4fd1…` |
 
+`casa-aura.html` está no `.gitignore` — é **saída de build**, não fica
+versionado. Regenere com `npm run build:unico`; o hash acima é o do
+artefato produzido a partir do commit atual. O `.zip` **está** versionado,
+porque é o pacote que se entrega a quem não vai clonar o repositório.
+
 O zip triplicou (273 798 → 813 869 B) e isso é **esperado**: passou a
 incluir `public/` — com os **sete renders da galeria do modo seguro**,
 que antes ficavam de fora — mais `testes/` e os documentos de entrega.
