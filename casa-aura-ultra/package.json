@@ -9,7 +9,8 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
-    "build:unico": "vite build --config vite.config.unico.ts && node scripts/gerar-html-unico.mjs"
+    "build:unico": "vite build --config vite.config.unico.ts && node scripts/gerar-html-unico.mjs",
+    "teste:fsm": "node testes/fsm-varredura.mjs"
   },
   "dependencies": {
     "gsap": "^3.12.5",
